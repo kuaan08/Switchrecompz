@@ -1,5 +1,5 @@
 # SwitchRecomp by MZ Labs; package import additions licensed under Apache-2.0.
-"""Bounded, streaming NSP/XCI import. No keys, games or extractor are bundled."""
+"""Bounded, streaming NSP/XCI import. No keys or games are bundled; releases include a locally built extractor."""
 from contextlib import contextmanager
 from pathlib import Path
 import os
@@ -92,7 +92,8 @@ def run_hactool(tool, keys, archive, options, title_key=None):
     with tempfile.TemporaryFile() as log:
         try:
             result = subprocess.run(args, stdin=subprocess.DEVNULL, stdout=log,
-                                    stderr=subprocess.STDOUT, timeout=1800, check=False)
+                                    stderr=subprocess.STDOUT, timeout=1800, check=False,
+                                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise ValueError('Cannot run hactool, or extraction exceeded 30 minutes.') from exc
         log.seek(0)
@@ -131,11 +132,12 @@ def import_game(source, *, hactool=None, keys=None, title_keys=None, program_nca
         raise ValueError('Use an extracted folder, .nro, .nsp, .xci or .nca. Compressed/split packages are unsupported.')
     if not source.is_file():
         raise ValueError('Package does not exist.')
-    tool = hactool or os.environ.get('SWR_HACTOOL') or shutil.which('hactool')
+    bundled = Path(__file__).resolve().parent / 'tools/hactool' / ('hactool.exe' if os.name == 'nt' else 'hactool')
+    tool = hactool or os.environ.get('SWR_HACTOOL') or (str(bundled) if bundled.is_file() else None) or shutil.which('hactool')
     keys = keys or os.environ.get('SWR_PROD_KEYS') or str(Path.home() / '.switch' / 'prod.keys')
     keys = Path(keys).expanduser().resolve()
     if not tool or not Path(tool).is_file() or not keys.is_file():
-        raise ValueError('Package import requires your hactool executable and prod.keys. Configure them in the app or use --hactool and --keys.')
+        raise ValueError('Package import requires hactool and your prod.keys. Release builds include hactool; select prod.keys in the app.')
     title_keys = read_title_keys(title_keys or os.environ.get('SWR_TITLE_KEYS'))
     say('Importing package (original file is read-only)...')
     with tempfile.TemporaryDirectory(prefix='switchrecomp-import-') as temp:

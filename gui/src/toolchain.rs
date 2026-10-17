@@ -45,6 +45,13 @@ impl Toolchain {
         Self { python: find_python(&home), tcc: find_tcc(&home), gcc: find_gcc(&home), home: Some(home) }
     }
 
+    pub fn hactool(&self) -> Option<PathBuf> {
+        self.home
+            .as_ref()
+            .map(|h| h.join("tools").join("hactool").join(format!("hactool{EXE}")))
+            .filter(|p| p.is_file())
+    }
+
     pub fn script(&self) -> Option<PathBuf> {
         self.home.as_ref().map(|h| h.join("switchrecomp.py"))
     }

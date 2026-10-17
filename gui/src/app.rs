@@ -340,7 +340,11 @@ impl App {
             home,
             script,
             input: PathBuf::from(&input),
-            hactool: self.settings.hactool.clone(),
+            hactool: if self.settings.hactool.trim().is_empty() {
+                self.tc.hactool().map(|p| p.display().to_string()).unwrap_or_default()
+            } else {
+                self.settings.hactool.clone()
+            },
             prod_keys: self.settings.prod_keys.clone(),
             title_keys: self.settings.title_keys.clone(),
             out_dir,
@@ -405,7 +409,10 @@ impl App {
         for action in std::mem::take(&mut self.actions) {
             match action {
                 Action::PickImport(which) => {
-                    if let Some(p) = dialog(frame, None).set_title("Choose your local extractor or keys file").pick_file() {
+                    if let Some(p) = dialog(frame, None)
+                        .set_title("Select your local key file or extractor override")
+                        .pick_file()
+                    {
                         let value = p.display().to_string();
                         match which {
                             0 => self.settings.hactool = value,
@@ -691,8 +698,11 @@ impl App {
             if ui.button("🗁  Folder…").clicked() {
                 self.actions.push(Action::PickInputFolder);
             }
-            if ui.button("🗋  Game file…").clicked() {
+            if ui.button("🗋  Open NSP / XCI / NCA / NRO…").clicked() {
                 self.actions.push(Action::PickInputNro);
+            }
+            if ui.button("🔑  Select prod.keys…").clicked() {
+                self.actions.push(Action::PickImport(1));
             }
             if !self.settings.recent.is_empty() {
                 ui.menu_button("Recent  ⏷", |ui| {
@@ -711,11 +721,19 @@ impl App {
         }
         ui.add_space(4.0);
         self.input_status(ui);
-        ui.collapsing("Package import (.nsp / .xci / .nca)", |ui| {
+        ui.label("hactool is included in release builds. Select your own prod.keys before importing a package.");
+        if !self.settings.prod_keys.trim().is_empty() {
+            ui.label(format!("prod.keys: {}", self.settings.prod_keys));
+        }
+        ui.collapsing("Advanced import options / title.keys", |ui| {
             ui.label(
-                "Use your own hactool and keys. Keys stay local. Updates/DLC need an extracted, merged base dump.",
+                "Override the bundled hactool only if needed. Keys stay local. Updates/DLC need a merged base dump.",
             );
-            for (which, label) in [(0, "hactool executable"), (1, "prod.keys"), (2, "title.keys (if required)")] {
+            for (which, label) in [
+                (0, "hactool override (blank uses included tool)"),
+                (1, "prod.keys"),
+                (2, "title.keys (if required)"),
+            ] {
                 ui.label(label);
                 ui.horizontal(|ui| {
                     let value = match which {

@@ -54,7 +54,7 @@ pub fn inspect(path: &Path) -> Result<GameInfo, String> {
                     modules: vec![],
                     default_title: default_title(None, &stem),
                     warnings: vec![
-                        "Package selected; contents will be verified during import. Configure your own hactool and keys below. Import support does not guarantee game compatibility.".into(),
+                        "Package selected; contents will be verified during import. Select your own prod.keys; release builds include hactool. Import support does not guarantee game compatibility.".into(),
                     ],
                 })
             }

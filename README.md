@@ -1,7 +1,7 @@
 # SwitchRecomp — Package Import Development
 
 Based on **SwitchRecomp by MZ Labs**. This development source adds experimental
-`.nsp`, `.xci` and `.nca` import through a local hactool installation and your own
+`.nsp`, `.xci` and `.nca` import through the included hactool and your own
 keys. See [PACKAGE_IMPORT.md](PACKAGE_IMPORT.md) for setup, supported inputs and
 limitations, and [CODE_REVIEW.md](CODE_REVIEW.md) for review/test results.
 
@@ -246,6 +246,8 @@ list of labels such as `["self-hosted", "windows"]`).
 
 | Component | License | Used for |
 | --- | --- | --- |
+| hactool (SciresM), pinned source | ISC | included NSP/XCI/NCA extraction |
+| mbed TLS, vendored with hactool | Apache 2.0 / GPL 2.0 dual license | hactool crypto; license included |
 | OpenH264 (Cisco) 2.4.1 | BSD 2-clause, `runtime\oh264\LICENSE` | game videos |
 | SPIRV-Cross (Khronos) | Apache 2.0, `runtime\spvc\LICENSE-SPIRV-Cross.txt` | LSFG shaders (Windows) |
 | texture2ddecoder | MIT, `runtime\bcn\LICENSE_texture2ddecoder.txt` | BCn textures |

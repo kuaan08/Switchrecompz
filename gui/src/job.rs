@@ -38,11 +38,9 @@ impl JobConfig {
         a.extend(["-u", "-X", "utf8"].map(OsString::from));
         a.push(self.script.clone().into());
         a.push(self.input.clone().into());
-        for (flag, value) in [
-            ("--hactool", &self.hactool),
-            ("--keys", &self.prod_keys),
-            ("--title-keys", &self.title_keys),
-        ] {
+        for (flag, value) in
+            [("--hactool", &self.hactool), ("--keys", &self.prod_keys), ("--title-keys", &self.title_keys)]
+        {
             if !value.trim().is_empty() {
                 a.push(flag.into());
                 a.push(value.trim().into());

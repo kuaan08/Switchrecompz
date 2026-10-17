@@ -13,8 +13,8 @@ It does not add game compatibility to the CPU, GPU or services runtime.
 | --- | --- | --- |
 | Extracted `exefs/romfs` | Existing loader | Same compatibility as upstream |
 | `.nro` | Existing homebrew loader | Same compatibility as upstream |
-| `.nsp` | Bounded PFS0 parser, streamed NCA extraction, external hactool | Base game, one Program NCA by default |
-| `.xci` | HEAD/root HFS0/secure HFS0 parser, streamed NCA extraction, external hactool | Uncompressed, unsplit image |
+| `.nsp` | Bounded PFS0 parser, streamed NCA extraction, included hactool | Base game, one Program NCA by default |
+| `.xci` | HEAD/root HFS0/secure HFS0 parser, streamed NCA extraction, included hactool | Uncompressed, unsplit image |
 | `.nca` | External hactool extracts ExeFS and RomFS | Standalone Program NCA only |
 | `.nsz`, `.xcz`, split dumps | Explicit rejection | Decompress/merge your own dump first |
 | Updates and DLC | Not applied automatically | Supply a correctly merged, extracted base dump |
@@ -30,19 +30,25 @@ be treated as experimental until tested with your own dumps.
 Build the modified application using the upstream build instructions. The
 upstream release EXE does not include these changes. In the modified GUI:
 
-1. Open **Package import (.nsp / .xci / .nca)**.
-2. Select a trusted local [hactool](https://github.com/SciresM/hactool) executable.
-   hactoolnet is a different tool and is not a drop-in replacement here.
-3. Select your own `prod.keys`. Rights-managed titles also need your own
-   `title.keys` with **decrypted** title keys, `rights_id = key` (32 hex characters
-   on each side). Tickets inside NSPs are not automatically imported.
-4. Select a game file using **Game file…**, or drag it onto the window.
-5. Select the compiler and choose **Recompile**. Import failures are shown in the
-   job log. A recognized container header is not a compatibility confirmation.
+1. Click **Select prod.keys…** on the main screen and select your own product-key file.
+2. Click **Open NSP / XCI / NCA / NRO…** and select your own game dump, or drag it onto the app.
+3. Choose the compiler and press **Recompile**. The included hactool is selected automatically.
+4. Rights-managed games also need your own decrypted `title.keys`; select it under
+   **Advanced import options / title.keys**. Each entry is `rights_id = key`,
+   with 32 hexadecimal characters on each side. Tickets are not imported automatically.
 
-The tool is not bundled and no keys, games or firmware are downloaded. Settings
-store only paths, not the key contents. Keys are not copied into game output.
-The extractor version and key generation support can limit which dumps work.
+Release builds include hactool, built from the official SciresM repository at
+`1d64a83450e025622f3468c28fc4164dad2c5ef6`, plus its vendored mbed TLS and licenses.
+No separately downloaded hactool executable is needed. For local source builds,
+check out that exact source revision and run
+`python3 ci/build_hactool.py --source /path/to/hactool` (after toolchain setup on Windows).
+The CI builds and smoke-tests the extractor, then embeds it in the application's
+single-file payload. That payload is unpacked locally at startup, like GCC/Python.
+
+The advanced extractor path is an optional override for development. hactoolnet
+has different arguments and is not a compatible override. Keys, games and firmware
+are never included. Settings remember key-file paths, not key contents.
+The extractor and key generation support can limit which dumps work.
 
 ## Command line
 
@@ -53,7 +59,7 @@ python3 switchrecomp.py MyGame.nca --hactool /opt/hactool --keys /private/prod.k
 ```
 
 Optional environment defaults: `SWR_HACTOOL`, `SWR_PROD_KEYS`, `SWR_TITLE_KEYS`.
-`hactool` on PATH and `~/.switch/prod.keys` are also detected.
+The bundled extractor is preferred over PATH; `~/.switch/prod.keys` is also detected.
 All key files stay local. The decrypted title key, when needed, is supplied to
 hactool via its `--contentkey` argument. Local process inspection by the same
 user or an administrator can see that argument. Do not share process traces.

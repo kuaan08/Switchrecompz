@@ -91,6 +91,17 @@ jobs:
       - name: Get Python, TCC and GCC
         run: ./ci/toolchains.ps1
 
+      - name: Check out pinned hactool source
+        uses: actions/checkout@v7
+        with:
+          repository: SciresM/hactool
+          ref: 1d64a83450e025622f3468c28fc4164dad2c5ef6
+          path: .ci-build/hactool
+          persist-credentials: false
+
+      - name: Build and test bundled hactool
+        run: ./python/python.exe ci/build_hactool.py --source .ci-build/hactool
+
       - name: Build the runtimes with GCC
         run: |
           ./python/python.exe -X utf8 switchrecomp.py --build-runtime --cc w64devkit/bin/gcc.exe
@@ -178,6 +189,17 @@ jobs:
 
       - name: Build TCC and OpenH264
         run: ./ci/toolchains.sh
+
+      - name: Check out pinned hactool source
+        uses: actions/checkout@v7
+        with:
+          repository: SciresM/hactool
+          ref: 1d64a83450e025622f3468c28fc4164dad2c5ef6
+          path: .ci-build/hactool
+          persist-credentials: false
+
+      - name: Build and test bundled hactool
+        run: python3 ci/build_hactool.py --source .ci-build/hactool
 
       - name: Build the runtimes with GCC
         run: |

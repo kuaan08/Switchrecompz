@@ -61,3 +61,5 @@ desktop.ini
 *.xcz
 hactool/
 SwitchRecomp.json
+
+/.ci-build/

@@ -16,6 +16,9 @@ if ($IsWindows) {
     $runtimes = 'bin/runtime_linux_x11', 'bin/runtime_linux_headless'
     $fetch = 'ci/toolchains.sh'
 }
+$tools += , 'tools'
+$hactool = if ($IsWindows) { 'tools/hactool/hactool.exe' } else { 'tools/hactool/hactool' }
+if (-not (Test-Path $hactool)) { throw 'Build the bundled hactool before staging the app' }
 foreach ($dir in $tools) {
     if (-not (Test-Path $dir)) { throw "$dir/ is missing: run $fetch first" }
 }
@@ -24,7 +27,7 @@ foreach ($rt in $runtimes) {
 }
 if (Test-Path $Out) { Remove-Item -Recurse -Force $Out }
 New-Item -ItemType Directory -Force $Out | Out-Null
-Copy-Item 'switchrecomp.py', 'package_import.py', 'nxloader.py', 'codegen.py', 'a64.py', 'LICENSE.txt', 'NOTICE.txt', 'README.md' $Out
+Copy-Item 'switchrecomp.py', 'package_import.py', 'nxloader.py', 'codegen.py', 'a64.py', 'LICENSE.txt', 'NOTICE.txt', 'README.md', 'PACKAGE_IMPORT.md', 'CODE_REVIEW.md' $Out
 foreach ($dir in @('runtime', 'bin') + $tools) {
     Copy-Item $dir $Out -Recurse
 }

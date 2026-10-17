@@ -122,7 +122,7 @@ class ImportTests(unittest.TestCase):
 
     def test_missing_tools_and_compressed_packages(self):
         args = dict(self.args, hactool=str(self.root / 'missing'))
-        with self.assertRaisesRegex(ValueError, 'requires your hactool'):
+        with self.assertRaisesRegex(ValueError, 'requires hactool'):
             with imp.import_game(self.source, **args):
                 self.fail('missing tool accepted')
         with self.assertRaisesRegex(ValueError, 'Compressed/split'):

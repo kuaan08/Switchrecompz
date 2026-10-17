@@ -65,3 +65,13 @@ review, not a full security audit or antivirus analysis of a new Windows binary.
 
 The source package retains upstream LICENSE and NOTICE. No keys or game data are
 included. Target repository: https://github.com/kuaan08/Switchrecompz.
+
+## Bundled extractor and CI follow-up
+
+The first Windows workflow stopped at rustfmt, before compiling the GUI. Corrected
+those formatting changes. The hactool dependency is now built from pinned official
+source, smoke-tested using a harmless PFS0 archive, and packaged with ISC and mbed
+TLS licenses. The GUI exposes product-key and game selectors on the main screen;
+the included extractor is detected automatically, with an optional override.
+The native hactool build/PFS0 extraction test passed locally on Linux. Windows GUI
+and complete single-file packaging still require the updated CI result.
