@@ -43,8 +43,8 @@ User testing has shown an NSP progressing through import and ARM64-to-C translat
 | --- | --- |
 | Windows x64 | Current build and release target |
 | Windows OpenGL | Current graphics backend; requires OpenGL 4.3 or newer |
-| Vulkan | No working renderer integrated into this release |
-| DirectX | No working renderer integrated into this release |
+| Windows Vulkan | Experimental ANGLE backend; hardware requires GLES 3.2 |
+| Windows DirectX 11 | Experimental ANGLE GLES 3.0 subset; hardware and WARP options |
 | Android arm64 | SDK/NDK APK export from the desktop app; physical-device validation pending |
 
 Vulkan and DirectX reuse the GLES renderer through ANGLE. DirectX 11 does not support compute/storage shaders or multiple render targets in this compatibility profile. Android exports a game-specific APK from the PC; SDK/NDK/JDK must be installed. See [PLATFORM_SUPPORT.md](PLATFORM_SUPPORT.md) for the tested boundary and [ANDROID.md](ANDROID.md) for setup.
