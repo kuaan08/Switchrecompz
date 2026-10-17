@@ -172,6 +172,24 @@ class ImportTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'header_key'):
             imp.normalize_keyset(self.keys, self.root / 'bad.keys')
 
+    def test_redundant_malformed_derivation_sources(self):
+        original = ('header_key = ' + '0' * 64 + '\nmaster_key_06 = ' + '1' * 32
+                    + '\nmaster_kek_source_06 = ' + '2' * 34
+                    + '\nmariko_master_kek_source_06 = ' + '3' * 34)
+        self.keys.write_text(original)
+        messages = []
+        normalized = imp.normalize_keyset(self.keys, self.root / 'normalized.keys', messages.append)
+        self.assertNotIn('kek_source_06', normalized.read_text())
+        self.assertIn('master_key_06', normalized.read_text())
+        self.assertEqual(self.keys.read_text(), original)
+        self.assertIn('Ignoring 2', messages[0])
+        self.keys.write_text(original.replace('master_key_06', 'master_key_07'))
+        with self.assertRaisesRegex(ValueError, 'Invalid master_kek_source_06'):
+            imp.normalize_keyset(self.keys, self.root / 'rejected.keys')
+        message = imp.hactool_failure('Key (' + 'a' * 34 + ') must be 32 hex digits!', 1, True)
+        self.assertIn('invalid length', message)
+        self.assertNotIn('a' * 34, message)
+
     def test_error_diagnostics_never_expose_output_keys(self):
         for raw in ['Invalid NCA header! ' + 'abcd' * 32,
                     'Failed to read PFS0 header! ' + '1234' * 32,

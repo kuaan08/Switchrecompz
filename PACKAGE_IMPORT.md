@@ -106,3 +106,8 @@ UTF-8 with/without BOM and UTF-16 BOM key files are accepted. `prod.keys` must
 contain a 64-hex-character `header_key`. A UTF-8 normalized copy is created only
 inside the private temporary import directory and removed with that directory.
 No key material is copied to game output or sent to GitHub.
+
+Malformed indexed master KEK derivation sources are omitted from the temporary
+keyset only if the corresponding valid-length derived master key is supplied.
+The log reports the count. Values are never truncated, and the original file is
+unchanged. Otherwise import stops with an entry-name-only format diagnostic.

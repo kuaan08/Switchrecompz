@@ -88,3 +88,15 @@ Also added key-file encoding normalization and validated the required header key
 format. Diagnostics use static categories plus exit code, never raw secret-bearing
 output. Eighteen Python tests and the native Linux extractor smoke tests passed;
 commercial-game decryption still needs the user's local retest.
+
+## Malformed redundant derivation-source follow-up
+
+Reproduced a native key-parser exit before NCA inspection using a privately supplied
+keyset. Some indexed master KEK source entries have 34 hex digits instead of 32.
+The importer now omits such an entry only when a syntactically valid corresponding
+derived master key exists, reports the omitted count, and leaves the original file
+unchanged. It never truncates or invents key material. Missing replacements fail
+with a key-name-only diagnostic. No supplied values are included in this repository.
+Nineteen Python tests pass. A synthetic plaintext NCA header probe with the
+normalized supplied keyset passes the native extractor; this verifies parser
+progress, not commercial-game decryption or the correctness of the supplied keys.

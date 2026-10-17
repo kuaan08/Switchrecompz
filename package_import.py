@@ -92,12 +92,32 @@ def key_text(path):
         raise ValueError('Unsupported key-file encoding. Save it as UTF-8 or UTF-16 with BOM.') from exc
 
 
-def normalize_keyset(source, target):
+def normalize_keyset(source, target, say=lambda _: None):
     text = key_text(source)
     match = re.search(r'^\s*header_key\s*=\s*([0-9a-fA-F]+)\s*(?:#.*)?$', text, re.MULTILINE | re.IGNORECASE)
     if not match or len(match[1]) != 64:
         raise ValueError('prod.keys must contain a 64-hex-character header_key to read encrypted NCA headers. Check the key file selected in the app.')
-    target.write_text(text, encoding='utf-8', newline='\n')
+    # Some exported keysets contain malformed hardware derivation sources even
+    # though they already include the final master keys. Never truncate a key.
+    entries = dict(re.findall(r'^\s*([a-z0-9_]+)\s*=\s*([0-9a-fA-F]+)\s*(?:#.*)?$',
+                              text, re.MULTILINE | re.IGNORECASE))
+    entries = {name.lower(): value for name, value in entries.items()}
+    lines, skipped = [], 0
+    for line in text.splitlines():
+        assignment = re.fullmatch(r'\s*((?:mariko_)?master_kek_source_([0-9a-fA-F]{2}))\s*=\s*([^#]*?)(?:#.*)?',
+                                  line, re.IGNORECASE)
+        if assignment:
+            name, generation, value = assignment.groups()
+            if not re.fullmatch(r'[0-9a-fA-F]{32}', value.strip()):
+                master = entries.get('master_key_' + generation.lower(), '')
+                if not re.fullmatch(r'[0-9a-fA-F]{32}', master):
+                    raise ValueError('Invalid %s: expected 32 hex digits and no valid derived master key is available.' % name.lower())
+                skipped += 1
+                continue
+        lines.append(line)
+    if skipped:
+        say('Ignoring %d malformed, redundant derivation sources; using supplied derived master keys. Original key file is unchanged.' % skipped)
+    target.write_text('\n'.join(lines) + '\n', encoding='utf-8', newline='\n')
     target.chmod(0o600)
     return target
 
@@ -110,6 +130,8 @@ def hactool_failure(output, code, inspection):
     status = code & 0xffffffff
     if status in {0xc0000005, 0xc0000409, 0xc0000374}:
         reason = 'native extractor crashed; the NCA or its encryption/section format could not be processed'
+    elif 'key (' in lower and 'hex digits' in lower:
+        reason = 'a key entry has an invalid length or non-hexadecimal characters; check the selected key file'
     elif 'invalid nca header' in lower:
         reason = 'cannot decrypt/recognize the NCA header; check header_key and whether the dump is intact'
     elif 'failed to read nca header' in lower:
@@ -192,7 +214,7 @@ def import_game(source, *, hactool=None, keys=None, title_keys=None, program_nca
     say('Importing package (original file is read-only)...')
     with tempfile.TemporaryDirectory(prefix='switchrecomp-import-') as temp:
         temp = Path(temp)
-        keys = normalize_keyset(keys, temp / '__keyset.keys')
+        keys = normalize_keyset(keys, temp / '__keyset.keys', say)
         archives = []
         if extension == '.nca':
             archives = [source]
