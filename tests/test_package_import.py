@@ -120,7 +120,7 @@ class ImportTests(unittest.TestCase):
         tool.parent.mkdir(parents=True)
         tool.write_bytes(b'test only')
         def run(selected, *args, **kwargs):
-            self.assertEqual(Path(selected), tool)
+            self.assertTrue(Path(selected).samefile(tool))
             return self.tool_result(selected, *args, **kwargs)
         with patch.object(imp, '__file__', str(home / 'package_import.py')):
             with patch.dict(os.environ, {'SWR_HACTOOL': '', 'SWR_TITLE_KEYS': ''}):
