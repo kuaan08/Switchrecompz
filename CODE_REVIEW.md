@@ -118,3 +118,23 @@ for product keys, title keys and optional external tickets are directly visible.
 Verification uses the normal importer and module loader without compilation.
 Synthetic tests cover signature layouts, truncation, common/personalized ticket
 behavior, matching, precedence, duplicates and correct hactool arguments.
+
+## Native Switch ticket layout regression
+
+Corrected two incorrect assumptions in our first ticket reader and its synthetic
+fixtures: the signature type is little-endian for Switch tickets, and the common
+data block is 0x180 bytes. An RSA-2048 common ticket is 0x2c0 bytes total, including
+the 0x140-byte signature block. The previous reader incorrectly required 0x400
+bytes and read the signature identifier big-endian. Checked these fields against
+nxdumptool include/core/tik.h (TikCommonBlock and TikSigRsa2048 size assertions)
+and include/core/signature.h (signatureGetTypeFromSignedBlob, called with false
+by tikGetCommonBlockFromSignedTicketBlob).
+
+Regression tests now use little-endian 0x10004 / a 0x2c0-byte signed common ticket,
+check fixed wire offsets, and reject truncated layouts. Unreadable embedded
+tickets generate static diagnostics and are skipped so that a valid selected
+title.keys entry or another matching ticket can still work. An explicitly chosen
+invalid external ticket and conflicting tickets still fail. No guess is made for
+unknown signature types, missing fields or personalized key material.
+Twenty-seven Python tests pass; the user's NSP is unavailable locally.
+Reference: https://github.com/DarkMatterCore/nxdumptool/tree/rewrite/include/core

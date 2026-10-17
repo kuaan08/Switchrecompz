@@ -21,8 +21,8 @@ def container(files, magic=b'PFS0'):
 
 def ticket(rights='1' * 32, kind=0, signature=0x10004):
     base = {0x10003: 0x240, 0x10004: 0x140, 0x10005: 0x80}[signature]
-    data = bytearray(base + 0x2c0)
-    data[:4] = signature.to_bytes(4, 'big')
+    data = bytearray(base + 0x180)
+    data[:4] = signature.to_bytes(4, 'little')
     data[base + 0x140] = 2
     data[base + 0x141] = kind
     data[base + 0x40:base + 0x50] = bytes.fromhex('a' * 32)
@@ -194,6 +194,36 @@ class ImportTests(unittest.TestCase):
         imp.add_ticket(mapping, ticket())
         with self.assertRaisesRegex(ValueError, 'Conflicting'):
             imp.add_ticket(mapping, ticket(kind=1))
+
+    def test_switch_ticket_wire_layout_regression(self):
+        raw = ticket()
+        self.assertEqual(len(raw), 0x2c0)
+        self.assertEqual(raw[:4], b'\x04\x00\x01\x00')
+        self.assertEqual(raw[0x280], 2)
+        self.assertEqual(raw[0x2a0:0x2b0], bytes.fromhex('1' * 32))
+        self.assertEqual(imp.read_ticket(raw), ('1' * 32, 'a' * 32))
+        self.assertEqual(imp.read_ticket(raw + bytes(0x140)), ('1' * 32, 'a' * 32))
+        with self.assertRaisesRegex(ValueError, 'Truncated ticket'):
+            imp.read_ticket(raw[:-1])
+        with self.assertRaisesRegex(ValueError, 'signature type'):
+            imp.read_ticket(b'\x00\x01\x00\x04' + raw[4:])
+
+    def test_unreadable_embedded_ticket_does_not_block_matching_title_key(self):
+        self.source.write_bytes(container([('program.nca', b'nca'), ('bad.tik', b'bad ticket')]))
+        titlekeys = self.root / 'title.keys'
+        titlekeys.write_text('1' * 32 + ' = ' + 'b' * 32)
+        messages = []
+        def tool(tool, keys, archive, options, title_key=None):
+            if options == ['-i']:
+                return 'Content Type: Program\nRights ID: ' + '1' * 32
+            self.assertEqual(title_key, 'b' * 32)
+            return self.tool_result(tool, keys, archive, options, title_key)
+        args = dict(self.args, say=messages.append)
+        with patch.object(imp, 'run_hactool', side_effect=tool):
+            with imp.import_game(self.source, title_keys=titlekeys, **args):
+                pass
+        self.assertTrue(any('embedded ticket skipped' in message for message in messages))
+        self.assertFalse(any('b' * 32 in message for message in messages))
 
     def test_embedded_common_ticket_fallback(self):
         self.source.write_bytes(container([('program.nca', b'nca'), ('game.tik', ticket())]))

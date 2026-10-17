@@ -200,12 +200,17 @@ def read_ticket(data):
     """Read bounded common-ticket fields; no signature/authenticity claim."""
     if len(data) < 4 or len(data) > 0x10000:
         raise ValueError('Invalid ticket size.')
-    signature = int.from_bytes(data[:4], 'big')
+    # Switch tickets serialize the signature type little-endian (nxdumptool).
+    signature = int.from_bytes(data[:4], 'little')
     offsets = {0x10000: 0x240, 0x10001: 0x140, 0x10002: 0x80,
                0x10003: 0x240, 0x10004: 0x140, 0x10005: 0x80, 0x10006: 0x40}
     base = offsets.get(signature)
-    if base is None or len(data) < base + 0x2c0:
-        raise ValueError('Unsupported or truncated ticket signature/data layout.')
+    if base is None:
+        raise ValueError('Unsupported ticket signature type (expected Switch little-endian signature identifier).')
+    # TikCommonBlock is 0x180 bytes. RSA-2048 common tickets total 0x2c0,
+    # not 0x140 + 0x2c0; optional section records can follow this block.
+    if len(data) < base + 0x180:
+        raise ValueError('Truncated ticket: %d bytes; this signature requires at least %d.' % (len(data), base + 0x180))
     if data[base + 0x140] != 2:
         raise ValueError('Unsupported ticket version.')
     kind = data[base + 0x141]
@@ -245,6 +250,7 @@ def import_game(source, *, hactool=None, keys=None, title_keys=None, ticket=None
     title_keys = read_title_keys(title_keys or os.environ.get('SWR_TITLE_KEYS'))
     say('Loaded %d title.keys entries; matching is checked against the selected Program NCA.' % len(title_keys))
     tickets = {}
+    skipped_tickets = 0
     if ticket:
         path = Path(ticket).expanduser()
         if not path.is_file() or path.stat().st_size > 0x10000:
@@ -263,8 +269,18 @@ def import_game(source, *, hactool=None, keys=None, title_keys=None, ticket=None
                 for name, offset, size in all_entries:
                     if name.lower().endswith('.tik'):
                         if size > 0x10000:
-                            raise ValueError('Embedded ticket is too large.')
-                        add_ticket(tickets, read_at(stream, offset, size))
+                            skipped_tickets += 1
+                            say('Warning: oversized embedded ticket skipped; using another matching ticket or title.keys if available.')
+                            continue
+                        try:
+                            rights, key = read_ticket(read_at(stream, offset, size))
+                        except ValueError as exc:
+                            skipped_tickets += 1
+                            say('Warning: embedded ticket skipped: %s' % exc)
+                            continue
+                        if rights in tickets and tickets[rights] != key:
+                            raise ValueError('Conflicting tickets for the same rights ID.')
+                        tickets[rights] = key
                 say('Found %d ticket rights IDs in selected package/ticket.' % len(tickets))
                 entries = [e for e in all_entries if e[0].lower().endswith('.nca')]
                 if not entries:
@@ -304,7 +320,7 @@ def import_game(source, *, hactool=None, keys=None, title_keys=None, ticket=None
                     if title_key is None:
                         detail = ('The matching ticket is personalized; export its decrypted title key from your console.'
                                   if identity in tickets else 'No matching common ticket was found in the package or selected .tik.')
-                        raise ValueError('Program NCA requires its decrypted title key, but none of the %d loaded title.keys entries matches its rights ID. %s Select the title.keys for this game or its own common .tik; renaming another entry does not supply the missing key.' % (len(title_keys), detail))
+                        raise ValueError('Program NCA requires its decrypted title key, but none of the %d loaded title.keys entries matches its rights ID. %s Skipped %d unreadable embedded ticket(s). Select the title.keys for this game or its own common .tik; renaming another entry does not supply the missing key.' % (len(title_keys), detail, skipped_tickets))
                     encrypted = True
                     say('Matching common ticket found; using its encrypted title key with prod.keys.')
                 else:

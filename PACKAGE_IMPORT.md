@@ -134,3 +134,9 @@ in source, generated game data or release artifacts.
 Format reference: https://switchbrew.org/wiki/Ticket
 Extractor behavior: pinned SciresM/hactool main.c and nca.c (`--titlekey` versus
 `--contentkey`).
+
+Switch tickets use little-endian signature identifiers and a 0x180-byte common
+data block; RSA-2048 common tickets are 0x2c0 bytes total. Unreadable embedded
+tickets are reported and skipped, allowing a matching selected title.keys entry
+or another ticket to be used. Unknown layouts are never interpreted by guessing
+key offsets. See nxdumptool include/core/tik.h and include/core/signature.h.
