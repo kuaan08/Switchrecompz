@@ -277,7 +277,7 @@ def build_runtime(cc, out, target_win, backend, say, opt='2'):
         if os.path.isfile(spvc): srcs += [os.path.join(RT, 'lsfg.c'), os.path.join(RT, 'lsfg_spvc.cpp')]
         else: spvc = None
     if gl and not spvc: srcs += [os.path.join(RT, 'lsfg_stub.c')]
-    if target_win and backend == 'win32': srcs += [os.path.join(RT, 'rec_win32.c')]   # F7 recorder, Media Foundation
+    if target_win and backend == 'win32': srcs += [os.path.join(RT, 'rec_win32.c'), os.path.join(RT, 'angle_win32.c')]
     # NVDEC/VIC video: link OpenH264 (BSD) statically if we have it for this target
     oh = os.path.join(RT, 'oh264', 'win' if target_win else 'lin')
     h264 = os.path.isfile(os.path.join(oh, 'libdecoder.a')) and backend in ('win32', 'x11', 'headless')
@@ -370,6 +370,7 @@ def main():
     ap.add_argument('--jobs', type=int, default=os.cpu_count() or 4)
     ap.add_argument('--chunk', type=int, default=30000, help='instructions per C file')
     ap.add_argument('--target', choices=['auto', 'win64', 'linux'], default='auto')
+    ap.add_argument('--renderer', choices=['opengl', 'vulkan', 'd3d11', 'd3d11-warp'], help='Windows graphics API (ANGLE paths are experimental)')
     ap.add_argument('--backend', choices=['auto', 'win32', 'x11', 'x11es', 'headless', 'android'], default='auto')
     ap.add_argument('--native', action='store_true', help='optimize for THIS processor (-march=native)')
     ap.add_argument('--no-build', action='store_true', help='only generate the C code and copy the game data')
@@ -388,6 +389,12 @@ def main():
     say = (lambda m: None) if a.quiet else (lambda m: print(m, flush=True))
     target_win = a.target == 'win64' or (a.target == 'auto' and sys.platform.startswith('win'))
     backend = a.backend if a.backend != 'auto' else ('win32' if target_win else 'x11')
+    if a.renderer and (not target_win or backend!='win32'):
+        raise ValueError('--renderer selects the Windows graphical runtime.')
+    if a.renderer and a.renderer!='opengl':
+        for name in ('libEGL.dll','libGLESv2.dll'):
+            if not os.path.isfile(os.path.join(HERE,'tools','angle',name)):
+                raise ValueError('ANGLE libraries are missing. Use the current release or run ci/fetch_angle.py first.')
     if a.build_runtime:
         cc = find_cc(a.cc, target_win)
         if not cc: raise SystemExit('C compiler not found: %s' % (a.cc or 'gcc'))
@@ -452,6 +459,13 @@ def main():
         files = gen_module(prog, mods, npdm, build, title, a.chunk, say)
         if not os.path.exists(base + '.ini'):
             with open(base + '.ini', 'w', encoding='utf-8') as fo: fo.write(INI % {'title': title})
+        if a.renderer:
+            if not target_win: raise ValueError('--renderer selects a Windows graphics API; Android uses GLES.')
+            ini_path=base+'.ini'
+            with open(ini_path, encoding='utf-8') as fi: ini=fi.read()
+            ini=re.sub(r'(?mi)^renderer\s*=.*\n?', '', ini)
+            ini=ini.replace('[Graphics]', '[Graphics]\nrenderer='+a.renderer, 1)
+            with open(ini_path,'w',encoding='utf-8') as fo: fo.write(ini)
         if a.no_build: return
         say('Compiling with %s (-O%s, %d at a time)...' % (os.path.basename(cc), a.O, a.jobs))
         extra = []
@@ -470,6 +484,8 @@ def main():
                 say('Compiling the runtime (%s)...' % backend)
                 build_runtime(cc, exe, target_win, backend, say)
         if not target_win: os.chmod(exe, 0o755)
+        if target_win and os.path.isdir(os.path.join(HERE,'tools','angle')):
+            sync_tree(os.path.join(HERE,'tools','angle'), os.path.join(outdir,'angle'))
         say('Done: %s' % exe)
 
 

@@ -49,6 +49,10 @@ desktop.ini
 
 # CI downloads and outputs
 /.ci-cache/
+*.apk
+*.keystore
+*.jks
+*_android/
 /dist/
 
 # Local extraction tools, keys and dumps must never enter source control.

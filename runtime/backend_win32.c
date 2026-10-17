@@ -4,6 +4,9 @@
 /* win32 backend: window, WGL, keyboard, XInput.
    F1 help  F3 screenshot  F4 fps limit  F11 fullscreen  Esc quit */
 #include "rt.h"
+#include "angle_win32.h"
+static char g_renderer[32]="opengl";
+static int angle_requested(void){ return strcmp(g_renderer,"opengl")!=0; }
 #include <windows.h>
 #include <mmsystem.h>  /* timeBeginPeriod (windows.h leaves it out with WIN32_LEAN_AND_MEAN) */
 
@@ -18,6 +21,10 @@ extern int g_opt_fps;
 static int g_ls_mode=0; static char g_ls_path[1024];
 void backend_ini(const char* k, const char* v){
   if(!strcmp(k,"fullscreen")) g_want_fs=atoi(v);
+  else if(!strcmp(k,"renderer")){
+    if(!strcmp(v,"opengl") || !strcmp(v,"vulkan") || !strcmp(v,"d3d11") || !strcmp(v,"d3d11-warp"))
+      snprintf(g_renderer,sizeof g_renderer,"%s",v);
+  }
   else if(!strcmp(k,"lossless_scaling")) g_ls_mode=atoi(v);
   else if(!strcmp(k,"lossless_path")) strncpy(g_ls_path,v,1023);
   else if(!strcmp(k,"seconds")) g_seconds=atoi(v);
@@ -154,7 +161,7 @@ static void win_thread(void* arg){ (void)arg;
   g_hdc=GetDC(g_hwnd);
   PIXELFORMATDESCRIPTOR pfd={sizeof pfd,1,PFD_DRAW_TO_WINDOW|PFD_SUPPORT_OPENGL|PFD_DOUBLEBUFFER,PFD_TYPE_RGBA,32};
   pfd.cDepthBits=24; pfd.cStencilBits=8; pfd.iLayerType=PFD_MAIN_PLANE;
-  SetPixelFormat(g_hdc,ChoosePixelFormat(g_hdc,&pfd),&pfd);
+  if(!angle_requested()) SetPixelFormat(g_hdc,ChoosePixelFormat(g_hdc,&pfd),&pfd);
   if(g_want_fs) set_fullscreen(1);
   ls_launch();
   SetEvent(g_ready);
@@ -163,6 +170,7 @@ static void win_thread(void* arg){ (void)arg;
 }
 
 void video_init(const char* title){
+  const char* override=getenv("SWR_RENDERER"); if(override && *override) backend_ini("renderer",override);
   snprintf(g_title,sizeof g_title,"%s - SwitchRecomp  (F1 help)",title);
   xinput_load(); timeBeginPeriod(1);
   g_ready=CreateEventA(NULL,TRUE,FALSE,NULL);
@@ -179,6 +187,15 @@ void video_init(const char* title){
 typedef HGLRC (WINAPI *CCA)(HDC,HGLRC,const int*);
 typedef BOOL (WINAPI *SWI)(int);
 int backend_gl_create(void){
+  const char* override=getenv("SWR_RENDERER");
+  if(override && *override) backend_ini("renderer",override);
+  if(angle_requested()){
+    extern int g_opt_vsync;
+    if(!swr_angle_create(g_hwnd,g_renderer,g_opt_vsync)){
+      fatal("%s: %s",g_renderer,swr_angle_error()); return 0;
+    }
+    LOG("renderer: %s through ANGLE (experimental)\n",g_renderer); return 1;
+  }
   HGLRC tmp=wglCreateContext(g_hdc); if(!tmp) return 0;
   wglMakeCurrent(g_hdc,tmp);
   CCA cca=(CCA)wglGetProcAddress("wglCreateContextAttribsARB");
@@ -191,11 +208,15 @@ int backend_gl_create(void){
   SWI si=(SWI)wglGetProcAddress("wglSwapIntervalEXT"); extern int g_opt_vsync; if(si) si(g_opt_vsync?1:0);
   return 1; }
 void* backend_gl_proc(const char* n){
+  if(swr_angle_active()) return swr_angle_proc(n);
   void* p=(void*)wglGetProcAddress(n);
   if(!p || p==(void*)1 || p==(void*)2 || p==(void*)3 || p==(void*)-1){ static HMODULE gl; if(!gl) gl=LoadLibraryA("opengl32.dll"); p=(void*)GetProcAddress(gl,n); }
   return p; }
-void backend_gl_swap(void){ SwapBuffers(g_hdc); }
-int backend_gl_worker_current(void){ return g_wctx && wglMakeCurrent(g_hdc,g_wctx); }
+void backend_gl_swap(void){
+  if(swr_angle_active()){ if(!swr_angle_swap()) fatal("ANGLE presentation failed: %s",swr_angle_error()); }
+  else SwapBuffers(g_hdc);
+}
+int backend_gl_worker_current(void){ return swr_angle_active()? swr_angle_worker_current() : g_wctx && wglMakeCurrent(g_hdc,g_wctx); }
 void backend_window_size(int* w, int* h){ *w=g_ww; *h=g_wh; }
 void video_present_rgba(const u32* px, int w, int h, int stride){ extern void gpu_gl_present_cpu(const u32*,int,int,int); gpu_gl_present_cpu(px,w,h,stride); }
 

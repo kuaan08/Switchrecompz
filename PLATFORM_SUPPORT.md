@@ -1,60 +1,79 @@
-# Rendering and Android development status
+# Graphics backends and Android export
 
-This fork is maintained by katakishi0 and is based on SwitchRecomp by MZ Labs.
-This document records the implementation review for the next platform work.
+SwitchRecomp by MZ Labs, with fork additions maintained by katakishi0.
+These integrations are experimental and do not establish game compatibility.
 
-| Target | Present in this source | Missing before claiming support |
+| Target | Implementation | Validation boundary |
 | --- | --- | --- |
-| Windows OpenGL | Win32 context, GL call queue, guest shader-to-GLSL translator, GPU resources and draw path | Per-game compatibility testing |
-| Windows Vulkan | No Vulkan renderer wired to the runtime | Resource/pipeline implementation, descriptors, barriers, shader generation, presentation and tests |
-| Windows DirectX | No D3D renderer wired to the runtime | D3D device/resources, shader path, state translation, synchronization, presentation and tests |
-| Android GLES | NativeActivity backend, EGL ES 3.2, touch overlay, Android filesystem and loader branches | NDK toolchain/build rules, arm64 libraries, APK packaging, lifecycle/input/storage tests and on-device game validation |
+| Windows OpenGL | Existing Win32/WGL renderer | Default; per-game correctness varies |
+| Windows Vulkan | EGL/ANGLE context and the existing GLES renderer/shader path | Hardware needs ANGLE GLES 3.2; software CI probes GLES 3.1, not every hardware feature |
+| Windows DirectX 11 | ANGLE GLES 3.0 compatibility profile, linked varyings, explicit sampler/UBO bindings | No compute/storage shaders or multiple render targets; limited shader/resource subset |
+| DirectX 11 WARP | Same profile on Windows' software rasterizer | Diagnostic option, not a performance optimization |
+| Android arm64 | NDK compilation, NativeActivity, GLES 3.2, touch/gamepad input, AAudio and signed APK export | Synthetic build/signature/ABI checks; device and game tests still needed |
 
-## Renderer review
+## Windows
 
-`runtime/gpu_gl.c`, `runtime/shader.c`, `runtime/gl_load.c` and the GL queue
-implement the current graphics path. A window/device selector cannot substitute
-for this renderer. The software fallback in `gpu_3d.c` only implements clears.
+The runtime still decodes guest GPU commands and translates guest shaders.
+ANGLE translates the resulting GLES operations to Vulkan or Direct3D 11.
+These are API paths through a translation layer, not native rewrites of the
+Maxwell renderer. Direct3D 12 is not implemented.
 
-N64Recomp separates CPU recompilation from the runtime. RT64 is useful as a design
-reference for Vulkan/D3D abstractions, resource lifetime, synchronization and
-presentation. Its N64 graphics model is not a replacement for Switch Maxwell/NVN
-command decoding and guest shader translation. No third-party renderer code has
-been copied into this fork.
+Choose the renderer in the build screen or game settings, then restart. INI
+values: `opengl`, `vulkan`, `d3d11`, `d3d11-warp`. The CLI accepts `--renderer`.
+The selected path never silently falls back to desktop OpenGL. Game builds
+receive ANGLE DLLs in the adjacent `angle` directory.
 
-ANGLE is a candidate to investigate for reusing the GLES path on Vulkan. Its
-published support matrix has ES 3.2 support on Vulkan, while D3D11 support is more
-limited. This runtime emits `#version 320 es` in the GLES shader path; feature and
-extension coverage must be tested before selecting ANGLE as a supported renderer.
-A native D3D12 backend would require its own implementation or a suitable
-cross-API rendering layer, plus translated shaders and synchronization tests.
+D3D11 uses GLSL ES 3.0 because ANGLE D3D11 does not supply GLES 3.2. Its subset
+covers basic vertex/fragment shaders, textures and constant buffers. Compute,
+storage shaders and excess constant-buffer use are rejected; multiple render
+targets stop with a diagnostic. Nonzero base vertex/instance and advanced
+sampler/format behavior remain limitations. Unsupported shader operations may
+fail compilation. Use Vulkan or OpenGL for titles needing these features.
 
-Next implementation gate: isolate the existing renderer's device, resource and
-presentation calls behind a backend contract and exercise clear/upload/draw/
-readback/synchronization fixtures. Keep OpenGL available until the new path passes
-those fixtures and real-game comparisons.
+Shader packs are separated by desktop/GLES profile; binary keys include GLSL
+and driver identity. Incompatible packs are not reused across profiles.
 
-## Android review
+## Dependency provenance and tests
 
-`backend_android.c` already exports `ANativeActivity_onCreate`, creates an EGL
-context and loads assets. `main.c` expects a recompiled Android `.so` or a static
-module. The current desktop CLI's Linux executable link rules are not an Android
-APK builder. The generated C must be compiled for the same Android ABI as the
-runtime; a Windows DLL cannot be placed in an arm64-v8a APK.
+`ci/fetch_angle.py` stages graphics libraries from official Chromium snapshot
+**1721443**, checking both archive and individual SHA-256 digests. ANGLE revision:
+`7865acacbf6380ce2acc54f5afd86a242cd239eb`; SwiftShader revision:
+`cddb5c91b23ff70a1f607ea31610aa0d7f4b5ad5`. No browser is bundled or launched.
+`tools/angle/PROVENANCE.json` and license files accompany the libraries.
+WARP is supplied by Windows.
 
-Next implementation gate: build a synthetic homebrew and runtime with the NDK for
-arm64-v8a, package/sign a minimal NativeActivity APK, and validate storage access,
-activity recreation, surface loss, touch/gamepad input and exit on a device. An
-Android source file alone does not establish this gate. No Android APK is
-published by the Windows-only workflow.
+The Windows probe translates a synthetic XYZ-only Maxwell shader, uploads a
+texture/constant buffer, draws a triangle, reads the pixel and checks its color.
+It also checks buffer readback and presentation, on D3D11 WARP and ANGLE
+Vulkan/SwiftShader. These checks do not reproduce a retail GPU or game.
 
-## Primary references consulted
+## Android
 
-- https://github.com/N64Recomp/N64Recomp
-- https://github.com/rt64/rt64
-- https://github.com/google/angle (README support matrix)
-- https://github.com/google/angle/blob/main/doc/DevSetup.md
-- https://developer.android.com/ndk/guides/abis
+The desktop exports a game-specific APK; the phone runs the compiled title.
+Choose Android APK and the installed SDK/NDK folders, or use `android_build.py`.
+See [ANDROID.md](ANDROID.md).
 
-Vulkan, DirectX and Android remain development work. They are not exposed as
-working graphics/output choices in this release.
+The exporter reuses the importer/analyzer, compiles generated code and runtime
+for arm64-v8a using NDK Clang, packages NativeActivity, and signs/verifies a debug
+APK. Native ELF segments use 16 KiB alignment. No root or broad storage permission
+is requested. Inputs unpack into private storage on a worker thread and are
+cached by content. Saves/settings remain separate from packaged inputs.
+
+AAudio supplies 48 kHz stereo output and stream reopening. Audio, surface
+recreation, suspend/resume, touch/gamepad behavior, memory pressure and game
+compatibility need physical-device tests. Android currently disables the
+unavailable arm64 OpenH264 dependency, so H.264 video is not supported by this
+build. ELF alignment alone does not validate 16 KiB host memory-page behavior.
+
+## Primary references
+
+- [ANGLE matrix](https://github.com/google/angle)
+- [ANGLE platform extension](https://chromium.googlesource.com/angle/angle/+/main/extensions/EGL_ANGLE_platform_angle.txt)
+- [ANGLE setup](https://chromium.googlesource.com/angle/angle/+/main/doc/DevSetup.md)
+- [NDK build systems](https://developer.android.com/ndk/guides/other_build_systems)
+- [NativeActivity](https://developer.android.com/ndk/reference/group/native-activity)
+- [AAudio](https://developer.android.com/ndk/guides/audio/aaudio/aaudio)
+
+Earlier architecture references included N64Recomp and RT64. No renderer code
+from those projects was copied; their graphics models are not interchangeable
+with this runtime's Switch GPU command handling.

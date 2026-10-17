@@ -9,6 +9,8 @@
 #include <math.h>
 #include "glfn.h"
 #include "shader.h"
+extern int g_glsl_es_version, g_shader_ubo_stride;
+extern int g_gles;
 
 int g_gl=0;                     /* active renderer */
 int gl_frontend_available;
@@ -46,7 +48,15 @@ static int q_pop(Work* w, i64 timeout){
 
 /* ============================================================ GL helpers */
 static GLuint compile(GLenum type, const char* src, char* err, int errn){
+  char* adapted=NULL;
+  /* Internal format probes are desktop GLSL. Exercise them on GLES too, rather
+     than treating a rejected #version line as a successful format check. */
+  if(g_gles && g_glsl_es_version>=310 && !strncmp(src,"#version 430 core\n",18)){
+    adapted=malloc(strlen(src)+96);
+    if(adapted){ snprintf(adapted,strlen(src)+96,"#version 310 es\nprecision highp float;\nprecision highp int;\n%s",src+18); src=adapted; }
+  }
   GLuint s=glCreateShader(type); glShaderSource(s,1,&src,NULL); glCompileShader(s); GLint ok=0; glGetShaderiv(s,GL_COMPILE_STATUS,&ok);
+  free(adapted);
   if(!ok){ if(err) glGetShaderInfoLog(s,errn,NULL,err); glDeleteShader(s); return 0; } return s; }
 static GLuint link2(GLuint a, GLuint b, GLuint c3){
   GLuint p=glCreateProgram(); if(a) glAttachShader(p,a); if(b) glAttachShader(p,b); if(c3) glAttachShader(p,c3); glLinkProgram(p);
@@ -491,6 +501,11 @@ static int st_snorm(GLenum ifmt, int n, float* got){
   return ok; }
 int g_texoff_emul;
 static void gl_selftest(void){
+  extern int g_glsl_es_version;
+  if(g_gles && g_glsl_es_version==300){
+    g_texoff_emul=1; g_lvl_mode=1; g_snorm_fb=1;
+    LOG("DirectX compatibility mode: desktop format self-tests disabled\n"); return;
+  }
   /* non-constant texture offsets: NVIDIA takes them, the spec / AMD / Mesa don't */
   if(g_gles) g_texoff_emul=1;
   else { static const char* fs="#version 430 core\nlayout(binding=0) uniform sampler2D t; uniform int k; out vec4 o; void main(){ o=textureOffset(t,vec2(0.5),ivec2(bitfieldExtract(k,0,4),bitfieldExtract(k,4,4))); }";
@@ -1226,7 +1241,7 @@ typedef struct { u64 a, gen, abs; u32 sz, epoch, off; } UrC;
 static UrC urc[4096];
 static void upload_cbufs_ring(int stage, Sh* s){
   extern u64 g_gw_gen; extern int gpu_mem_dirty_since(u64,u64,u64);
-  int bb=(stage==0? 0 : stage==4? 1 : 2)*18;
+  int bb=(stage==0? 0 : stage==4? 1 : 2)*g_shader_ubo_stride;
   for(int i=0;i<18;i++){ if(!(s->si.cbuf_mask&(1u<<i))) continue;
     u64 a=g_cb.cb[stage][i]; u32 sz=g_cb.cbsize[stage][i]; if(sz>65536) sz=65536; if(!sz) sz=16;
     if(s->si.cbuf_max[i] && sz>s->si.cbuf_max[i]) sz=s->si.cbuf_max[i];   /* only the bytes the shader reads */
@@ -1247,7 +1262,7 @@ static void upload_cbufs(int stage, Sh* s){
     { /* same submit/address, not GPU-written: unchanged (games don't write while the GPU reads) */
       extern u64 g_gw_gen; extern int gpu_mem_dirty_since(u64,u64,u64); static u64 la[5][18], lg[5][18], le[5][18];
       if(a && la[stage][i]==a && le[stage][i]==g_submit_epoch && last_sz[stage][i]>=sz && !gpu_mem_dirty_since(lg[stage][i],a,sz)){
-        st_cb_skip++; glBindBufferBase(GL_UNIFORM_BUFFER,(stage==0? 0 : stage==4? 1 : 2)*18+i,g_ubuf[stage][i]); continue; }
+        st_cb_skip++; glBindBufferBase(GL_UNIFORM_BUFFER,(stage==0? 0 : stage==4? 1 : 2)*g_shader_ubo_stride+i,g_ubuf[stage][i]); continue; }
       la[stage][i]=a; lg[stage][i]=g_gw_gen; le[stage][i]=g_submit_epoch; }
     st_cb_bytes+=sz;
     u8* src= a? gmem_ptr(a,sz) : NULL; u8 tmp_local[256]; u8* tmp=NULL;
@@ -1255,7 +1270,7 @@ static void upload_cbufs(int stage, Sh* s){
     if(last_sz[stage][i]<sz || memcmp(last[stage][i],src,sz)){      /* exact compare */
       memcpy(last[stage][i],src,sz); last_sz[stage][i]=sz;
       glBindBuffer(GL_UNIFORM_BUFFER,g_ubuf[stage][i]); glBufferData(GL_UNIFORM_BUFFER,65536,NULL,GL_STREAM_DRAW); glBufferSubData(GL_UNIFORM_BUFFER,0,sz,src); }
-    glBindBufferBase(GL_UNIFORM_BUFFER,(stage==0? 0 : stage==4? 1 : 2)*18+i,g_ubuf[stage][i]); } }
+    glBindBufferBase(GL_UNIFORM_BUFFER,(stage==0? 0 : stage==4? 1 : 2)*g_shader_ubo_stride+i,g_ubuf[stage][i]); } }
 /* multi-bind (GL 4.4): a stage's textures + samplers in two calls, none if nothing changed.
    other glBindTexture users (uploads, creation) use g_scratch_unit */
 typedef void (APIENTRY*PFN_BT_)(GLuint,GLsizei,const GLuint*);
@@ -1616,6 +1631,8 @@ void r3d_draw_gl(GpuChannel* ch, int indexed, u32 topology, u32 first, u32 count
         (r[0x800]&1)?" VertexA":"",(r[0x810]&1)?" VertexB":"",(r[0x820]&1)?" TessCtrl":"",(r[0x830]&1)?" TessEval":"",(r[0x840]&1)?" Geometry":"",(r[0x850]&1)?" Fragment":""); } } trace_note("DRAW SKIPPED: link failed vs=%016llx fs=%016llx\n",(unsigned long long)vs->hash,(unsigned long long)fs->hash); return; } }
   g_draw_layered=vs->si.writes_layer;
   TM(TM_STATE,bind_framebuffer(ch));
+  if(g_gles && g_glsl_es_version==300 && g_nrt>1)
+    fatal("This game needs multiple render targets. Select Vulkan or OpenGL instead of DirectX compatibility mode.");
   if(g_nrt && g_rt[0]){ g_last_cw=g_rt[0]->w; g_last_ch=g_rt[0]->h; }
   { extern int g_opt_shadows; /* shadows=0: skip depth-only passes at a different size (shadow maps) */
     if(!g_opt_shadows && !g_nrt && g_zt && (g_zt->w!=g_last_cw || g_zt->h!=g_last_ch)){ trace_note("DRAW SKIPPED: shadow\n");
@@ -2102,7 +2119,12 @@ static void APIENTRY gl_dbg(GLenum src, GLenum type, GLuint id, GLenum sev, GLsi
 /* ============================================================ shader pack
    every new program's GLSL (driver independent) gets appended to shader_cache/shader_pack.bin. at startup
    whatever isn't in the binary cache yet is compiled in the background. the pack can be moved to another PC */
-#define PACK_PATH "shader_cache/shader_pack_v4.bin"   /* v4: initialize VS homogeneous position */
+static const char* shader_pack_path(void){
+  extern int g_glsl_es_version;
+  return !g_gles? "shader_cache/shader_pack_v5_gl.bin" : g_glsl_es_version==300?
+    "shader_cache/shader_pack_v5_es300.bin" : "shader_cache/shader_pack_v5_es320.bin";
+}
+#define PACK_PATH shader_pack_path()
 static u64* pk_keys; static u32 pk_n, pk_cap;
 static int pk_has(u64 k){ if(!pk_cap) return 0; u32 i=(u32)(k^(k>>29))&(pk_cap-1); while(pk_keys[i]){ if(pk_keys[i]==k) return 1; i=(i+1)&(pk_cap-1); } return 0; }
 static void pk_put(u64 k){ if(!k) k=1; if(pk_n*2>=pk_cap){ u32 oc=pk_cap; u64* ok=pk_keys; pk_cap= oc? oc*2 : 4096; pk_keys=calloc(pk_cap,8); pk_n=0; for(u32 i=0;i<oc;i++) if(ok[i]) pk_put(ok[i]); free(ok); }
@@ -2251,7 +2273,14 @@ static void gpu_thread(void* arg){ t_gpu_thread=1;
     if(qs<0 || (qs==0 && (!backend_gl_create() || !swr_gl_load(backend_gl_proc)))){ WARN("No OpenGL 4.3: running without a graphics card\n"); g_gl=0; g_gl_ready=1; return; } }
   { extern int g_glsl_version, g_glsl_es; GLint mj=4, mn=3; glGetIntegerv(GL_MAJOR_VERSION,&mj); glGetIntegerv(GL_MINOR_VERSION,&mn); g_glsl_version= (mj>4||(mj==4&&mn>=4))? 440 : 430;
     const char* vs=(const char*)glGetString(GL_VERSION); if(vs && strstr(vs,"OpenGL ES")){ g_gles=1; g_glsl_es=1; }
-    if(g_gles){ GLint n=0; glGetIntegerv(GL_NUM_EXTENSIONS,&n); typedef const GLubyte* (APIENTRY*GSI)(GLenum,GLuint); GSI gsi=(GSI)backend_gl_proc("glGetStringi");
+    if(g_gles){
+      g_glsl_es_version=(mj==3 && mn==0)? 300 : 320;
+      if(g_glsl_es_version==300){
+        GLint count=24; glGetIntegerv(GL_MAX_UNIFORM_BUFFER_BINDINGS,&count);
+        g_shader_ubo_stride=(count-1)/2; if(g_shader_ubo_stride>18) g_shader_ubo_stride=18;
+        LOG("DirectX compatibility mode: GLES 3.0, no compute/storage shaders, %d constant-buffer slots per stage\n",g_shader_ubo_stride);
+      }
+      GLint n=0; glGetIntegerv(GL_NUM_EXTENSIONS,&n); typedef const GLubyte* (APIENTRY*GSI)(GLenum,GLuint); GSI gsi=(GSI)backend_gl_proc("glGetStringi");
       for(GLint k=0;k<n && gsi;k++){ const char* e=(const char*)gsi(GL_EXTENSIONS,(GLuint)k); if(!e) continue;
         if(!strcmp(e,"GL_KHR_texture_compression_astc_ldr")) g_has_astc=1;
         if(!strcmp(e,"GL_EXT_texture_compression_s3tc")) g_has_s3tc=1;
@@ -2277,7 +2306,12 @@ static void gpu_thread(void* arg){ t_gpu_thread=1;
   if(g_verbose>=2){ typedef void (APIENTRY*DBGCB)(GLDEBUGPROC,const void*); DBGCB f=(DBGCB)backend_gl_proc("glDebugMessageCallback"); if(f){ glEnable(GL_DEBUG_OUTPUT); f(gl_dbg,NULL); } }
   glGenFramebuffers(1,&g_fbo); glGenFramebuffers(1,&g_rfbo); glGenFramebuffers(1,&g_dfbo); glGenVertexArrays(1,&g_vao); glGenVertexArrays(1,&g_scratch_vao); glGenBuffers(32,g_vbuf); glGenBuffers(1,&g_ibuf);
   for(int s=0;s<5;s++) glGenBuffers(18,g_ubuf[s]);
-  { GLuint a=compile(GL_VERTEX_SHADER,g_gles? BLIT_VS_ES : BLIT_VS,NULL,0), b=compile(GL_FRAGMENT_SHADER,g_gles? BLIT_FS_ES : BLIT_FS,NULL,0); g_blit_prog=link2(a,b,0); }
+  { const char* v300="#version 300 es\nprecision highp float; out vec2 uv; uniform vec4 xf; void main(){vec2 p=vec2(float(gl_VertexID&1)*2.0-1.0,float(gl_VertexID>>1)*2.0-1.0);uv=(p*.5+.5)*xf.zw+xf.xy;gl_Position=vec4(p,0,1);}";
+    const char* f300="#version 300 es\nprecision highp float; in vec2 uv; out vec4 o; uniform sampler2D t; void main(){o=vec4(texture(t,uv).rgb,1);}";
+    int legacy=g_gles && g_glsl_es_version==300;
+    GLuint a=compile(GL_VERTEX_SHADER,legacy? v300 : g_gles? BLIT_VS_ES : BLIT_VS,NULL,0), b=compile(GL_FRAGMENT_SHADER,legacy? f300 : g_gles? BLIT_FS_ES : BLIT_FS,NULL,0); g_blit_prog=link2(a,b,0);
+    if(!g_blit_prog) fatal("The graphics backend could not compile its presentation shaders.");
+  }
   if(!g_gles){ glEnable(GL_FRAMEBUFFER_SRGB); glDisable(GL_FRAMEBUFFER_SRGB); glEnable(0x8642); }   /* GL_PROGRAM_POINT_SIZE, gl_PointSize comes from the shader */
   { extern float g_opt_resf; g_scale=g_opt_resf; if(g_scale!=1.0f) LOG("internal resolution x%.2f\n",g_scale); }
   rs_update();
@@ -2288,6 +2322,7 @@ static void gpu_thread(void* arg){ t_gpu_thread=1;
   if(!g_gles && !getenv("SWR_NO_TEXVIEW")) p_tview=(PFNGLTEXTUREVIEWPROC)backend_gl_proc("glTextureView");
   if(!g_gles) lsfg_init();
   p_cis=(PFNGLCOPYIMAGESUBDATAPROC)backend_gl_proc("glCopyImageSubData");
+  if(g_gles && g_glsl_es_version==300) p_cis=NULL;
   gl_selftest(); state_dirty(); mb_reset();
   LOG("gpu: native 0..1 depth %s, texture views %s\n",p_clip? "yes" : "no",p_tview? "yes" : "no");
   LOG("gpu: texture multi-bind %s, persistent constant ring %s\n",p_bt? "yes" : "no",g_ur_ptr? "yes" : "no");
@@ -2485,6 +2520,7 @@ static CsProg* g_csp[256]; static u64 st_cs_run, st_cs_fail;
 static u8 g_cs_cb_[8][0x10000]; static u32 g_cs_cbn[8];
 static int cs_cb_read(u32 idx, u32 off, u32* out){ if(idx<8 && off+4<=g_cs_cbn[idx]){ memcpy(out,g_cs_cb_[idx]+off,4); return 1; } return 0; }
 void gpu_gl_dispatch(GpuChannel* ch, const u32* q, u64 code){
+  if(g_gles && g_glsl_es_version==300) fatal("This game uses compute shaders. Select Vulkan or OpenGL instead of DirectX compatibility mode.");
   if(getenv("SWR_NO_COMPUTE")) return;
   extern void r3d_pending_flush(void); r3d_pending_flush();
   u32* rc=ch->rcomp; u64 prog=code+q[8];

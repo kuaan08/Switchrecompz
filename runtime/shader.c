@@ -11,6 +11,8 @@
 int g_glsl_version=440;
 int g_vs_layer_ext=1;   /* 1 ARB_shader_viewport_layer_array, 2 AMD_vertex_shader_layer, 3 NV_viewport_array2, 0 none */
 int g_glsl_es=0;
+int g_glsl_es_version=320;
+int g_shader_ubo_stride=18;
 int g_rs_binding=83;   /* binding of the res-scale UBO, set by gpu_gl */   /* GLSL ES 3.20 (Android) */
 #define B(v,lo,n) ((u32)(((v)>>(lo))&((1ull<<(n))-1)))
 
@@ -1144,10 +1146,15 @@ char* shader_to_glsl(const u8* code, u32 max_bytes, int stage, ShaderInfo* si){
   else if(exit_end!=c->out.n){ c->indent=1; exit_epilogue(c); }   /* dead if we already ended with EXIT */
   /* declarations */
   Sb* D=&c->decl;
-  if(g_glsl_es){ sb_put(D,"#version 320 es\nprecision highp float;\nprecision highp int;\n");
+  int legacy=g_glsl_es && g_glsl_es_version==300;
+  if(legacy && (stage==ST_CS || si->ngbuf || si->nimg || c->uses_shared || (si->cbuf_mask>>g_shader_ubo_stride))){
+    si->unsupported++; snprintf(si->first_unsupported,sizeof si->first_unsupported,"GLES 3.0 mode: requires compute/storage or more UBO slots");
+    free(c->out.p); free(c->pop_tgt); free(c); return NULL;
+  }
+  if(g_glsl_es){ sb_f(D,"#version %d es\nprecision highp float;\nprecision highp int;\n",g_glsl_es_version);
     static const char* ps[]={"sampler2D","sampler3D","samplerCube","sampler2DArray","samplerCubeArray","sampler2DShadow","sampler2DArrayShadow","samplerCubeShadow","samplerCubeArrayShadow",
       "isampler2D","usampler2D","isampler3D","usampler3D","isampler2DArray","usampler2DArray"};
-    for(unsigned k=0;k<sizeof ps/sizeof ps[0];k++) sb_f(D,"precision highp %s;\n",ps[k]); }
+    for(unsigned k=0;k<sizeof ps/sizeof ps[0];k++) if(!legacy || !strstr(ps[k],"CubeArray")) sb_f(D,"precision highp %s;\n",ps[k]); }
   else sb_f(D,"#version %d core\n",g_glsl_version);
   /* gl_Layer from the VS needs an extension on desktop GL; without one we render to layer 0 */
   if(stage!=ST_FS && si->writes_layer){
@@ -1156,17 +1163,29 @@ char* shader_to_glsl(const u8* code, u32 max_bytes, int stage, ShaderInfo* si){
     else if(g_vs_layer_ext==3) sb_put(D,"#extension GL_NV_viewport_array2 : require\n#define SWR_SET_LAYER(v) gl_Layer=(v)\n");
     else sb_put(D,"#define SWR_SET_LAYER(v)\n"); }
   if(stage==ST_FS && (si->sph[0]>>15&1)) {}
-  if(stage==ST_FS && si->uses_position_in) sb_f(D,"layout(std140, binding=%d) uniform SWR_RS { vec4 swr_rs; };\n",g_rs_binding);   /* 1/res scale */
+  if(stage==ST_FS && si->uses_position_in){
+    if(legacy) sb_put(D,"layout(std140) uniform SWR_RS { vec4 swr_rs; };\n");
+    else sb_f(D,"layout(std140, binding=%d) uniform SWR_RS { vec4 swr_rs; };\n",g_rs_binding);
+  }
   /* packed binding numbers, Intel's windows driver has very few: VS 0.., FS 1.., others 2.. */
   int slot= stage==ST_VS? 0 : stage==ST_FS? 1 : 2;
-  int base_bind=slot*18;
+  int base_bind=slot*g_shader_ubo_stride;
   for(int i=0;i<si->ngbuf;i++) sb_f(D,"layout(std430, binding=%d) %sbuffer S%d_G%d { uint d[]; } g%d;\n",stage==ST_CS? i : slot*8+i,((si->gbuf_wmask>>i)&1)? "" : "readonly ",stage,i,i);
   if(stage==ST_CS) sb_f(D,"layout(local_size_x=%u, local_size_y=%u, local_size_z=%u) in;\n",si->cs_local[0]? si->cs_local[0] : 1,si->cs_local[1]? si->cs_local[1] : 1,si->cs_local[2]? si->cs_local[2] : 1);
-  for(int i=0;i<18;i++) if(si->cbuf_mask&(1u<<i)) sb_f(D,"layout(std140, binding=%d) uniform S%d_CB%d { vec4 d[4096]; } cb%d;\n",base_bind+i,stage,i,i);
-  for(int i=0;i<si->ntex;i++){ ShTex* t=&si->tex[i]; sb_f(D,"layout(binding=%d) uniform %s S%d_tex%d;\n#define tex%d S%d_tex%d\n",slot*(g_glsl_es? 16 : 32)+i,T("%s%s",(!t->shadow && ((si->tex_int_mask>>i)&1))? (((si->tex_sint_mask>>i)&1)? "i" : "u") : "",samp_type(t->type,t->array,t->shadow)),stage,i,i,stage,i); }   /* stage-unique name */
+  for(int i=0;i<18;i++) if(si->cbuf_mask&(1u<<i)){
+    if(legacy) sb_f(D,"layout(std140) uniform S%d_CB%d { vec4 d[4096]; } cb%d;\n",stage,i,i);
+    else sb_f(D,"layout(std140, binding=%d) uniform S%d_CB%d { vec4 d[4096]; } cb%d;\n",base_bind+i,stage,i,i);
+  }
+  for(int i=0;i<si->ntex;i++){ ShTex* t=&si->tex[i];
+    if(!legacy) sb_f(D,"layout(binding=%d) ",slot*(g_glsl_es? 16 : 32)+i);
+    sb_f(D,"uniform %s S%d_tex%d;\n#define tex%d S%d_tex%d\n",T("%s%s",(!t->shadow && ((si->tex_int_mask>>i)&1))? (((si->tex_sint_mask>>i)&1)? "i" : "u") : "",samp_type(t->type,t->array,t->shadow)),stage,i,i,stage,i);
+  }
   if(stage==ST_VS){
     for(int i=0;i<32;i++) if(c->in_used[i]){ si->in_mask|=1u<<i; int isint=(attr_int>>i)&1; sb_f(D,"layout(location=%d) in %s in_attr%d;\n",i,isint? ((si->attr_sint_mask>>i)&1? "ivec4":"uvec4") : "vec4",i); }
-    for(int i=0;i<32;i++) if(c->out_used[i]){ si->out_mask|=1u<<i; sb_f(D,"layout(location=%d) out vec4 out_attr%d;\n",i,i); }
+    for(int i=0;i<32;i++) if(c->out_used[i]){ si->out_mask|=1u<<i;
+      if(legacy) sb_f(D,"out vec4 attr%d;\n#define out_attr%d attr%d\n",i,i,i);
+      else sb_f(D,"layout(location=%d) out vec4 out_attr%d;\n",i,i);
+    }
     /* invariant so depth matches across passes with different shaders */
     if(!g_glsl_es){ if(si->writes_layer) sb_put(D,"invariant gl_Position;\nout float gl_ClipDistance[8];\n");   /* Mesa drops gl_Layer when the block is redeclared */
       else sb_put(D,"out gl_PerVertex { invariant vec4 gl_Position; float gl_PointSize; float gl_ClipDistance[8]; };\n"); }
@@ -1174,7 +1193,8 @@ char* shader_to_glsl(const u8* code, u32 max_bytes, int stage, ShaderInfo* si){
   } else if(stage==ST_FS){
     const u8* imap=(const u8*)si->sph+0x18;
     for(int i=0;i<32;i++) if(c->in_used[i]){ si->in_mask|=1u<<i; u8 m=imap[i]; int f=(m&3)==1 || ((m>>2)&3)==1 || (flat>>i)&1; int lin=(m&3)==3;
-      sb_f(D,"layout(location=%d) %sin vec4 in_attr%d;\n",i,f? "flat " : (lin && !g_glsl_es)? "noperspective " : "",i); }
+      if(legacy) sb_f(D,"%sin vec4 attr%d;\n#define in_attr%d attr%d\n",f? "flat " : "",i,i,i);
+      else sb_f(D,"layout(location=%d) %sin vec4 in_attr%d;\n",i,f? "flat " : (lin && !g_glsl_es)? "noperspective " : "",i); }
     u32 target=si->sph[18]; for(int rt=0;rt<8;rt++) if((target>>(rt*4))&15) sb_f(D,"layout(location=%d) out %s frag_color%d;\n",rt,((si->rt_int_mask>>rt)&1)? (((si->rt_sint_mask>>rt)&1)? "ivec4" : "uvec4") : "vec4",rt);
   }
   if(c->uses_local) sb_put(D,"uint lmem[1024];\n");

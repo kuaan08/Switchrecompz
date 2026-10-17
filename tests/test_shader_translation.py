@@ -70,6 +70,7 @@ void free_test(char* text) { free(text); }
         cls.lib.free_test.argtypes = [ctypes.c_void_p]
 
     def translate(self, components, es=0):
+        ctypes.c_int.in_dll(self.lib, 'g_glsl_es_version').value = 320
         code = position_shader(components)
         buf = ctypes.create_string_buffer(code)
         unsupported = ctypes.c_int()
@@ -96,6 +97,21 @@ void free_test(char* text) { free(text); }
         text = self.translate(4)
         self.assertLess(text.index('gl_Position = vec4('),
                         text.index('gl_Position.w = uintBitsToFloat(r3);'))
+
+    def test_gles_300_vertex_profile(self):
+        code = position_shader(3)
+        buf = ctypes.create_string_buffer(code)
+        unsupported = ctypes.c_int()
+        ctypes.c_int.in_dll(self.lib, 'g_glsl_es_version').value = 300
+        ptr = self.lib.translate_test(buf, len(code), 0, 1, ctypes.byref(unsupported))
+        self.assertTrue(ptr)
+        try:
+            text = ctypes.string_at(ptr).decode()
+        finally:
+            self.lib.free_test(ptr)
+        self.assertTrue(text.startswith('#version 300 es'))
+        self.assertNotIn('samplerCubeArray', text)
+        self.assertEqual(unsupported.value, 0)
 
 
 if __name__ == '__main__':

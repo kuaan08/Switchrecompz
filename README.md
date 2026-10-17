@@ -1,8 +1,8 @@
 # SwitchRecompz
 
-A Windows-focused development fork of [SwitchRecomp by MZ Labs](https://github.com/Mythrax-ZS/SwitchRecomp), with fork additions maintained by [katakishi0](https://github.com/katakishi0).
+A development fork of [SwitchRecomp by MZ Labs](https://github.com/Mythrax-ZS/SwitchRecomp), with fork additions maintained by [katakishi0](https://github.com/katakishi0).
 
-SwitchRecomp translates Nintendo Switch ARM64 code to C ahead of time and compiles it into native host code. A separate runtime supplies the system services, graphics, audio and input that the translated program needs.
+SwitchRecomp translates Nintendo Switch ARM64 code to C ahead of time and compiles it into native host code. A separate runtime supplies the system services, graphics, audio and input that the translated program needs. The Windows desktop app also has an experimental Android arm64 APK export target.
 
 > **Work in progress.** This is an experimental recompiler and runtime. Importing or compiling a title successfully does not establish gameplay compatibility. Bring your own game dumps and keys; no games, keys or firmware are included.
 
@@ -21,8 +21,8 @@ The table describes code and tools present in this fork. It is not a list of gam
 | Package import | Experimental NSP, XCI and standalone Program NCA input through bundled hactool; NRO homebrew input is also available | Compressed or split dumps and automatic update/DLC combining are not supported |
 | Key selection | Separate product-key, title-key and optional common-ticket selectors; full rights-ID matching | A selected key file is not proof that it contains the correct key for a title |
 | Verification | Import, decryption and module-loading checks without C generation, compilation or launch | Does not test gameplay or establish ticket-signature authenticity |
-| Graphics | OpenGL renderer, guest shader translation to GLSL, GPU command handling and resource caches | Rendering accuracy and performance need per-game validation |
-| Audio | Audio renderer and output services, PCM/ADPCM decoding, resampling and mixing; Windows waveOut output | Some effects are approximated or passed through |
+| Graphics | OpenGL plus experimental ANGLE Vulkan and DirectX 11 paths | DirectX is a limited GLES 3.0 compatibility profile; all paths need per-game validation |
+| Audio | PCM/ADPCM decoding, mixing and resampling; Windows waveOut and Android AAudio | Some effects are approximated; Android output needs device tests |
 | Video | H.264 jobs decoded on the CPU through OpenH264 | Not a claim of complete NVDEC or codec compatibility |
 | Input | Keyboard and XInput controller support on Windows | Controller mappings and game behavior still need testing |
 | Desktop app | Rust/egui interface, background jobs, progress log, library and settings | A completed build may still fail at runtime |
@@ -45,9 +45,9 @@ User testing has shown an NSP progressing through import and ARM64-to-C translat
 | Windows OpenGL | Current graphics backend; requires OpenGL 4.3 or newer |
 | Vulkan | No working renderer integrated into this release |
 | DirectX | No working renderer integrated into this release |
-| Android | Platform code exists, but there is no validated APK build or published Android app |
+| Android arm64 | SDK/NDK APK export from the desktop app; physical-device validation pending |
 
-Vulkan, DirectX and Android remain development goals. The missing implementation and validation work is recorded in [PLATFORM_SUPPORT.md](PLATFORM_SUPPORT.md).
+Vulkan and DirectX reuse the GLES renderer through ANGLE. DirectX 11 does not support compute/storage shaders or multiple render targets in this compatibility profile. Android exports a game-specific APK from the PC; SDK/NDK/JDK must be installed. See [PLATFORM_SUPPORT.md](PLATFORM_SUPPORT.md) for the tested boundary and [ANDROID.md](ANDROID.md) for setup.
 
 ## How it works
 
@@ -57,7 +57,7 @@ Recompilation happens before the program runs:
 2. **Load modules.** The loader reads executable modules, decompresses them where needed, and resolves the metadata used for analysis.
 3. **Analyze ARM64.** The analyzer finds functions and control-flow blocks using unwind information, symbols, relocation targets, branch targets and any previous execution hints.
 4. **Generate C.** Guest functions become C functions. Output is divided into chunks so the C compiler can process several chunks at once.
-5. **Compile and link.** GCC or TCC compiles the generated code into a native module. The runtime and translated module form the runnable build.
+5. **Compile and link.** GCC, TCC or Android NDK Clang compiles the generated code into a native module. The runtime and translated module form the runnable build.
 6. **Run through the runtime.** The runtime starts the translated entry point and handles guest memory, threads, service calls, graphics, sound and input.
 
 **Static CPU recompilation does not remove the runtime.** The guest program still expects Switch behavior from system services and the GPU. Missing or inaccurate runtime behavior can therefore break a title even when every C chunk compiles.
@@ -94,7 +94,8 @@ The translated code calls a runtime API rather than implementing the console's o
 | OpenGL rendering | Host GPU resources, draws and queued OpenGL calls | [runtime/gpu_gl.c](runtime/gpu_gl.c), [runtime/glq.c](runtime/glq.c) |
 | Shader translation | Translates guest GPU instructions to GLSL for the host driver | [runtime/shader.c](runtime/shader.c) |
 | Sound and video | Guest audio mixing/output and the H.264 decoding path | [runtime/audio.c](runtime/audio.c), [runtime/host1x.c](runtime/host1x.c) |
-| Windows integration | Window creation, OpenGL context, keyboard and XInput | [runtime/backend_win32.c](runtime/backend_win32.c) |
+| Windows integration | Window creation, WGL or EGL/ANGLE context, keyboard and XInput | [runtime/backend_win32.c](runtime/backend_win32.c), [runtime/angle_win32.c](runtime/angle_win32.c) |
+| Android export | NDK arm64 runtime/module compilation, APK packaging and debug signing | [android_build.py](android_build.py), [runtime/backend_android.c](runtime/backend_android.c) |
 | Headless backend | Runs synthetic fixtures without a graphics window | [runtime/backend_headless.c](runtime/backend_headless.c) |
 
 The CPU recompiler and GPU shader translator are separate systems. Generating native CPU code does not precompile every graphics shader or guarantee correct rendering.
@@ -105,6 +106,7 @@ The interface groups the workflow into input, keys and output/build settings. Lo
 
 - **Input and keys:** choose the input, `prod.keys`, `title.keys` and an optional external common ticket. The bundled extractor is detected automatically; an override is available for development.
 - **Verification:** use **Verify game and keys** before a long build. It runs the import and loader checks without starting compilation.
+- **Output target:** choose Windows or Android APK. Windows offers OpenGL, experimental Vulkan and limited DirectX 11/WARP choices. Android uses NDK Clang and exposes SDK/NDK folder selectors.
 - **Compiler options:** choose TCC for quick iteration or GCC for optimized output. GCC exposes optimization level and an optional host-CPU optimization choice. A build optimized for one CPU may not run on another.
 - **Library:** launch completed builds, open their settings or logs, and delete their build cache when space is needed.
 - **Updates:** **Check for updates** compares the installed development build with this fork's published development release and opens GitHub. Updating remains a manual step.
@@ -136,17 +138,17 @@ CI native caches are keyed by the relevant source and build inputs. The workflow
 
 Release notes and SHA-256 checksums are on the [Releases page](https://github.com/kuaan08/Switchrecompz/releases). The development package is replaced only after the Windows build succeeds.
 
-The single-file package includes the app, recompiler, runtimes, Python, hactool, TCC and GCC. First launch unpacks the embedded payload under `%LOCALAPPDATA%\SwitchRecomp`.
+The single-file package includes the app, recompiler, runtimes, Python, hactool, TCC, GCC and ANGLE graphics libraries. Android SDK/NDK/JDK remain external build requirements. First launch unpacks the embedded payload under `%LOCALAPPDATA%\SwitchRecomp`.
 
 ## Getting started
 
-Requirements: Windows 10/11 x64, an OpenGL 4.3-capable GPU with a suitable driver, and enough free storage and memory for the title's generated code and compilation. Large titles can generate substantial amounts of C; there is no single tested hardware minimum for every title.
+Requirements: Windows 10/11 x64, a GPU/driver suitable for the selected graphics API (OpenGL 4.3 by default), and enough free storage and memory for the title's generated code and compilation. Large titles can generate substantial amounts of C; there is no single tested hardware minimum for every title.
 
 1. Launch the app and select your own input.
 2. Select `prod.keys` and, when required, a matching `title.keys` entry or common ticket.
 3. Run **Verify game and keys** and resolve any reported issue.
-4. Set an output name, compiler and parallel-job count, then start recompilation.
-5. Open the completed build from the library and check its runtime log if it fails.
+4. Choose Windows or Android APK, set the output name and parallel-job count, then start recompilation.
+5. Launch a Windows build from the library, or reveal/install the exported APK on an Android arm64 device. Check the runtime log if it fails.
 
 More parallel jobs can increase memory use. TCC favors compile speed; GCC takes longer to compile but can produce faster code. Neither compiler choice establishes compatibility.
 
@@ -165,6 +167,7 @@ Use Windows, PowerShell 7, Rust and the Windows build tools required by eframe. 
 ```powershell
 # Fetch the pinned, checksummed toolchains
 ./ci/toolchains.ps1
+python ci/fetch_angle.py
 
 # Build the pinned extractor
 git clone https://github.com/SciresM/hactool.git .ci-build/hactool
@@ -194,14 +197,15 @@ The result is `gui/target/release/SwitchRecomp.exe`. TCC is available for transl
 
 ### Continuous integration
 
-The [Build workflow](.github/workflows/build.yml) builds and tests Windows x64. Pushes to `main`/`master` publish the development release after successful checks; version tags publish versioned releases. Pull requests produce build artifacts without publishing a release. The workflow can also be started manually.
+The [Build workflow](.github/workflows/build.yml) builds and tests Windows x64, probes ANGLE D3D11 WARP and Vulkan/SwiftShader, and builds a synthetic Android arm64 APK. Android build checks do not replace device tests. Pushes to `main`/`master` publish the development release after successful checks; version tags publish versioned releases. Pull requests produce build artifacts without publishing a release. The workflow can also be started manually.
 
 ## Documentation
 
 | Document | Contents |
 | --- | --- |
 | [Package import](PACKAGE_IMPORT.md) | Supported inputs, key/ticket setup, verification and import limits |
-| [Platform support](PLATFORM_SUPPORT.md) | Current renderer and Android implementation status |
+| [Platform support](PLATFORM_SUPPORT.md) | Graphics integration, constraints and validation boundary |
+| [Android export](ANDROID.md) | SDK/NDK setup, APK generation, signing and limitations |
 | [Code review](CODE_REVIEW.md) | Review findings, regression fixes and validation history |
 | [Build workflow](.github/workflows/build.yml) | Toolchain setup, checks, caches, packaging and release publication |
 
@@ -215,6 +219,7 @@ The project also depends on third-party work:
 
 | Component | Role | License |
 | --- | --- | --- |
+| [ANGLE](https://github.com/google/angle), Vulkan loader and SwiftShader | GLES translation to Vulkan/DirectX; software graphics diagnostics | BSD / Apache 2.0 and component-specific notices |
 | [hactool](https://github.com/SciresM/hactool) and its vendored mbed TLS | Package import and cryptographic operations | ISC / Apache 2.0 |
 | [OpenH264](https://github.com/cisco/openh264) | H.264 decoding | BSD 2-clause |
 | [SPIRV-Cross](https://github.com/KhronosGroup/SPIRV-Cross) | Shader tooling used by the optional Windows LSFG integration | Apache 2.0 |

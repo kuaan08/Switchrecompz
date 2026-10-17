@@ -26,6 +26,10 @@ pub struct Settings {
     /// Empty means the games folder next to switchrecomp.py.
     pub out_dir: String,
     pub compiler: Compiler,
+    pub android: bool,
+    pub android_sdk: String,
+    pub android_ndk: String,
+    pub renderer: String,
     pub opt_level: u8,
     pub native: bool,
     /// 0 means one job per CPU thread.
@@ -45,6 +49,10 @@ impl Default for Settings {
             name: String::new(),
             out_dir: String::new(),
             compiler: Compiler::Tcc,
+            android: false,
+            android_sdk: String::new(),
+            android_ndk: String::new(),
+            renderer: "opengl".into(),
             opt_level: 2,
             native: false,
             jobs: 0,

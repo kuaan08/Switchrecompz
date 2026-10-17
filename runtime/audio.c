@@ -94,6 +94,38 @@ static void host_write(const i16* pcm){
   if(g_pa){ int err; p_write(g_pa,pcm,PERIOD*4,&err); return; }
   long n=a_writei(g_apcm,pcm,PERIOD); if(n<0 && a_recover(g_apcm,(int)n,1)>=0) a_writei(g_apcm,pcm,PERIOD); }
 static void host_wait(void){ plat_sleep_ns(1000000); }
+#elif defined(__ANDROID__)
+#include <aaudio/AAudio.h>
+static AAudioStream* g_aa;
+static int host_open(void){
+  AAudioStreamBuilder* b=NULL;
+  aaudio_result_t r=AAudio_createStreamBuilder(&b);
+  if(r!=AAUDIO_OK) return 0;
+  AAudioStreamBuilder_setDirection(b,AAUDIO_DIRECTION_OUTPUT);
+  AAudioStreamBuilder_setFormat(b,AAUDIO_FORMAT_PCM_I16);
+  AAudioStreamBuilder_setChannelCount(b,2);
+  AAudioStreamBuilder_setSampleRate(b,OUT_RATE);
+  AAudioStreamBuilder_setSharingMode(b,AAUDIO_SHARING_MODE_SHARED);
+  AAudioStreamBuilder_setPerformanceMode(b,AAUDIO_PERFORMANCE_MODE_LOW_LATENCY);
+  r=AAudioStreamBuilder_openStream(b,&g_aa); AAudioStreamBuilder_delete(b);
+  if(r!=AAUDIO_OK){ WARN("audio: AAudio open failed (%d)\n",r); return 0; }
+  if(AAudioStream_getSampleRate(g_aa)!=OUT_RATE || AAudioStream_getChannelCount(g_aa)!=2 ||
+     AAudioStream_getFormat(g_aa)!=AAUDIO_FORMAT_PCM_I16 || AAudioStream_requestStart(g_aa)!=AAUDIO_OK){
+    AAudioStream_close(g_aa); g_aa=NULL; WARN("audio: AAudio format/start failed\n"); return 0; }
+  LOG("audio: AAudio, 48 kHz stereo\n"); return 1;
+}
+static int host_room(void){ return g_aa? 1 : 0; }
+static void host_write(const i16* pcm){
+  int sent=0;
+  while(g_aa && sent<PERIOD){
+    aaudio_result_t n=AAudioStream_write(g_aa,pcm+sent*2,PERIOD-sent,20000000);
+    if(n<0){ WARN("audio: AAudio disconnected (%d), reopening\n",n);
+      AAudioStream_close(g_aa); g_aa=NULL; host_open(); break; }
+    if(!n) break;
+    sent+=n;
+  }
+}
+static void host_wait(void){ if(!g_aa) plat_sleep_ns(5000000); }
 #else
 static int host_open(void){ return 0; }
 static int host_room(void){ return 0; }

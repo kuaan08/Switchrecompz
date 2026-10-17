@@ -186,3 +186,33 @@ XYZ-only output: the center pixel was black before initialization and red after.
 All 34 Python tests passed locally. No uploaded game shaders, captures, logs, keys
 or game content are committed. Windows packaging remains subject to CI, and this
 is not a claim of complete game compatibility.
+
+## Experimental ANGLE graphics and Android export — 2026-10-17
+
+Added explicit Win32 EGL/ANGLE display selection for Vulkan, D3D11 and D3D11 WARP.
+The loader does not mix WGL functions into an active GLES context. D3D11 uses a
+restricted GLSL ES 3.0 profile with matching varying names and explicit uniform
+bindings; compute/storage resources and multiple render targets are unsupported.
+Vulkan requests GLES 3.2. Shader warm-up packs now distinguish desktop and GLES
+profiles. GLES buffer readback maps actual data instead of returning zeros.
+
+Pinned ANGLE binaries come from official Chromium snapshot 1721443. Archive and
+component SHA-256 checks are required; libraries and third-party license notices
+are staged into the Windows release. The standalone graphics probe uses synthetic
+instructions/assets only, and checks texture/UBO rendering plus pixel/buffer
+readback and presentation on WARP and Vulkan/SwiftShader. Software Vulkan CI uses
+GLES 3.1, so it does not validate the complete hardware GLES 3.2 runtime.
+
+Android export compiles generated code and the runtime for arm64 with the NDK,
+packages NativeActivity and local inputs, aligns native load segments to 16 KiB,
+and signs/verifies a debug APK. SDK/NDK/JDK are external requirements. Only title
+inputs and licenses enter the APK; key paths/contents and the debug signing key
+do not. Native asset extraction runs outside the UI thread, checks manifest paths
+and caches inputs by content in private storage. AAudio replaces the previously
+silent Android audio stub. No broad-storage or root permission is requested.
+
+Locally, 39 Python tests pass, the Rust interface passes cargo check/Clippy, and a
+synthetic Android APK builds, verifies its v2/v3 signature and passes arm64/native
+alignment checks. Physical-device audio/input/lifecycle, game compatibility and
+complete 16 KiB host-page behavior remain unverified. Android H.264 decoding is
+not enabled. See PLATFORM_SUPPORT.md and ANDROID.md for the supported boundary.

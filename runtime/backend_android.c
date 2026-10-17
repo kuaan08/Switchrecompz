@@ -24,7 +24,8 @@ static ANativeWindow* g_win; static int g_win_gen;           /* bumped whenever 
 static AInputQueue* g_queue; static AInputQueue* g_queue_att; static int g_queue_dying;
 static pthread_mutex_t g_mx=PTHREAD_MUTEX_INITIALIZER; static pthread_cond_t g_cv=PTHREAD_COND_INITIALIZER;
 static int g_started;
-static char g_ext[1024], g_name[128]="BowsersFury";
+static char g_ext[1024], g_name[128]="game";
+static int g_packaged;
 extern int g_overlay_visible;
 extern void overlay_touch(int id, int action, float x, float y);
 extern void overlay_state(u64* b, i32* lx, i32* ly, i32* rx, i32* ry);
@@ -137,7 +138,7 @@ void video_poll(void){
   if(g_queue && !g_queue_att && !g_queue_dying){ ALooper* lp=ALooper_prepare(ALOOPER_PREPARE_ALLOW_NON_CALLBACKS); AInputQueue_attachLooper(g_queue,lp,1,NULL,NULL); g_queue_att=g_queue; }
   AInputQueue* q=g_queue_att;
   pthread_mutex_unlock(&g_mx);
-  if(q){ int dummy; void* data; while(ALooper_pollAll(0,NULL,&dummy,&data)>=0){}
+  if(q){ int dummy; void* data; while(ALooper_pollOnce(0,NULL,&dummy,&data)>=0){}
     AInputEvent* ev=NULL; while(AInputQueue_getEvent(q,&ev)>=0){ if(AInputQueue_preDispatchEvent(q,ev)) continue; int h=handle_event(ev); AInputQueue_finishEvent(q,ev,h); } }
   u64 b=g_keys;
   if(g_hat[0]<-0.5f) b|=1ull<<12; if(g_hat[0]>0.5f) b|=1ull<<14; if(g_hat[1]<-0.5f) b|=1ull<<13; if(g_hat[1]>0.5f) b|=1ull<<15;
@@ -195,8 +196,51 @@ static void immersive(JNIEnv* env){
   (*env)->CallVoidMethod(env,v,ss,0x1000|0x4|0x2|0x400|0x200|0x100);
   if((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env); }
 
+/* The exporter supplies a bounded manifest instead of requiring broad storage
+   access. Extract on the game thread: a large package must not block Android UI. */
+static int unpack_game_assets(void){
+  char* build=asset_text("switchrecomp/build-id.txt");
+  char stamp[1400], saved[128]={0}; snprintf(stamp,sizeof stamp,"%s/.swr-payload",g_ext);
+  FILE* sf=fopen(stamp,"r"); if(sf){ fgets(saved,sizeof saved,sf); fclose(sf); }
+  int cached=build && !strcmp(build,saved);
+  AAsset* list=AAssetManager_open(g_act->assetManager,"switchrecomp/assets.txt",AASSET_MODE_BUFFER);
+  if(!list){ free(build); return 0; }
+  off64_t len=AAsset_getLength64(list);
+  if(len<0 || len>8*1024*1024){ AAsset_close(list); free(build); return 0; }
+  char* names=malloc((size_t)len+1);
+  if(!names){ AAsset_close(list); free(build); return 0; }
+  int got=AAsset_read(list,names,(size_t)len); AAsset_close(list);
+  if(got!=len){ free(names); free(build); return 0; } names[len]=0;
+  int ok=1; char* state=NULL;
+  for(char* name=strtok_r(names,"\n",&state);name;name=strtok_r(NULL,"\n",&state)){
+    if((strncmp(name,"exefs/",6) && strncmp(name,"romfs/",6)) || strstr(name,"../") ||
+       strchr(name,'\\') || strchr(name,'\r') || strlen(name)>900){ ok=0; break; }
+    char ap[1024], dp[1400], tmp[1420], parent[1400];
+    snprintf(ap,sizeof ap,"game/%s",name); snprintf(dp,sizeof dp,"%s/%s_data/%s",g_ext,g_name,name);
+    snprintf(tmp,sizeof tmp,"%s.part",dp); snprintf(parent,sizeof parent,"%s",dp);
+    char* slash=strrchr(parent,'/'); if(slash) *slash=0; mkdirs(parent);
+    AAsset* src=AAssetManager_open(g_act->assetManager,ap,AASSET_MODE_STREAMING);
+    struct stat existing;
+    if(src && cached && !stat(dp,&existing) && S_ISREG(existing.st_mode) && existing.st_size==AAsset_getLength64(src)){
+      AAsset_close(src); continue;
+    }
+    FILE* dst=src? fopen(tmp,"wb") : NULL;
+    if(!src || !dst){ if(src) AAsset_close(src); ok=0; break; }
+    off64_t total=0, expected=AAsset_getLength64(src); char buf[65536]; int n;
+    while((n=AAsset_read(src,buf,sizeof buf))>0){ if(fwrite(buf,1,n,dst)!=(size_t)n){ ok=0; break; } total+=n; }
+    if(n<0 || total!=expected) ok=0;
+    if(fclose(dst)) ok=0; AAsset_close(src);
+    if(!ok || rename(tmp,dp)){ unlink(tmp); ok=0; break; }
+  }
+  if(ok && build){ FILE* f=fopen(stamp,"w"); if(f){ fputs(build,f); fclose(f); } }
+  free(build); free(names); return ok;
+}
+
 /* ---------------- game thread */
 static void* game_thread(void* arg){ (void)arg;
+  if(g_packaged && !unpack_game_assets()){
+    android_log("Could not unpack the game's APK assets."); ANativeActivity_finish(g_act); return NULL;
+  }
   char argv0[1400]; snprintf(argv0,sizeof argv0,"%s/%s",g_ext,g_name); char* argv[2]={argv0,NULL};
   extern int swr_main(int,char**); swr_main(1,argv); return NULL; }
 static int dir_exists(const char* p){ struct stat s; return !stat(p,&s) && S_ISDIR(s.st_mode); }
@@ -232,14 +276,15 @@ JNIEXPORT void ANativeActivity_onCreate(ANativeActivity* a, void* saved, size_t 
   { /* game name asset; APKs packaged by older versions call it nombre.txt */
     char* nm=asset_text("switchrecomp/name.txt"); if(!nm) nm=asset_text("switchrecomp/nombre.txt");
     if(nm){ strncpy(g_name,nm,sizeof g_name-1); free(nm); } }
-  const char* base= a->externalDataPath? a->externalDataPath : a->internalDataPath;
+  char* packaged=asset_text("switchrecomp/build-id.txt"); g_packaged=packaged!=NULL; free(packaged);
+  const char* base= g_packaged? a->internalDataPath : (a->externalDataPath? a->externalDataPath : a->internalDataPath);
   strncpy(g_ext,base,sizeof g_ext-1); mkdirs(g_ext);
   /* game binaries + default ini from the apk */
-  char dd[1400]; snprintf(dd,sizeof dd,"%s/%s_data/exefs",g_ext,g_name); extract_dir("exefs",dd);
+  char dd[1400]; snprintf(dd,sizeof dd,"%s/%s_data/exefs",g_ext,g_name); if(!g_packaged) extract_dir("exefs",dd);
   { char ini[1400]; snprintf(ini,sizeof ini,"%s/%s.ini",g_ext,g_name); struct stat st; if(stat(ini,&st)){ AAsset* x=AAssetManager_open(a->assetManager,"switchrecomp/game.ini",AASSET_MODE_BUFFER);
       if(x){ FILE* f=fopen(ini,"wb"); if(f){ fwrite(AAsset_getBuffer(x),1,AAsset_getLength(x),f); fclose(f); } AAsset_close(x); } } }
   /* romfs lookup order: apk, app dir, /sdcard/SwitchRecomp/<game>_data/romfs */
-  int chunks=open_romfs_assets();
+  int chunks=g_packaged? 1 : open_romfs_assets();
   char r2[1400], r3[1400]; snprintf(r2,sizeof r2,"%s/%s_data/romfs",g_ext,g_name); snprintf(r3,sizeof r3,"/storage/emulated/0/SwitchRecomp/%s_data/romfs",g_name);
   if(!chunks && !dir_exists(r2)){
     if(dir_exists(r3) && access(r3,R_OK|X_OK)==0){ strncpy(g_romfs_dir_override,r3,sizeof g_romfs_dir_override-1); }

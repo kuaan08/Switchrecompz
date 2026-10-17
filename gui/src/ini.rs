@@ -81,6 +81,18 @@ pub const SECTIONS: &[Section] = &[
         windows_only: false,
         opts: &[
             Opt {
+                key: "renderer",
+                default: "opengl",
+                label: "Windows renderer (restart required)",
+                help: "ANGLE backends are experimental. DirectX compatibility mode does not support compute/storage shaders or multiple render targets.",
+                kind: Kind::Choice(&[
+                    ("opengl", "OpenGL"),
+                    ("vulkan", "Vulkan (ANGLE)"),
+                    ("d3d11", "DirectX 11 (limited)"),
+                    ("d3d11-warp", "DirectX 11 WARP (software, limited)"),
+                ]),
+            },
+            Opt {
                 key: "resolution",
                 default: "1",
                 label: "Internal resolution",

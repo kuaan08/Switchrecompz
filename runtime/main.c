@@ -171,6 +171,7 @@ static const IniOpt INI_DISPLAY[]={
   {"language","1","Game language: 0 Japanese, 1 English (US), 2 French, 3 German, 4 Italian, 5 Spanish,\n;   6 Chinese, 7 Korean, 8 Dutch, 9 Portuguese, 10 Russian, 11 Taiwanese, 12 English (UK),\n;   13 French (Canada), 14 Spanish (Latin America)"},
   {NULL,NULL,NULL}};
 static const IniOpt INI_GRAPHICS[]={
+  {"renderer","opengl","Windows renderer (restart required): opengl, vulkan (ANGLE), d3d11 or d3d11-warp (ANGLE compatibility mode)"},
   {"resolution","1","Internal 3D resolution: 1 = native, 2 = double, 0.75 / 0.5 = faster (applies live)"},
   {"dynamic_resolution","0","1 = lower the resolution automatically when the GPU can't keep up (down to dynamic_resolution_min)"},
   {"dynamic_resolution_min","0.6","Lowest internal resolution allowed by dynamic_resolution"},

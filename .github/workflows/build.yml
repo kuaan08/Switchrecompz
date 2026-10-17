@@ -84,10 +84,13 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: .ci-cache
-          key: tools-${{ hashFiles('ci/toolchains.ps1') }}
+          key: tools-${{ hashFiles('ci/toolchains.ps1', 'ci/fetch_angle.py') }}
 
       - name: Get Python, TCC and GCC
         run: ./ci/toolchains.ps1
+
+      - name: Get pinned ANGLE Vulkan and DirectX libraries
+        run: python ci/fetch_angle.py
 
       - name: Save verified tool downloads
         if: steps.tool_downloads.outputs.cache-hit != 'true'
@@ -135,6 +138,17 @@ jobs:
           foreach ($file in $required) {
             if (-not (Test-Path $file -PathType Leaf)) { throw "Missing native build output: $file" }
           }
+
+      - name: Test Vulkan and DirectX graphics paths
+        run: |
+          $env:PATH = (Resolve-Path w64devkit/bin).Path + ';' + $env:PATH
+          ./w64devkit/bin/gcc.exe -O2 -I runtime ci/graphics_probe.c runtime/angle_win32.c runtime/gl_load.c runtime/shader.c -o graphics-probe.exe
+          if ($LASTEXITCODE) { exit 1 }
+          $env:SWR_ANGLE_DIR = (Resolve-Path tools/angle).Path
+          ./graphics-probe.exe d3d11-warp
+          if ($LASTEXITCODE) { exit 1 }
+          ./graphics-probe.exe vulkan-software
+          if ($LASTEXITCODE) { exit 1 }
 
       - name: Test package import
         run: python -m unittest discover -s tests -v
@@ -205,9 +219,28 @@ jobs:
           path: dist/out/*
           if-no-files-found: error
 
+  android:
+    name: Android APK exporter
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install SDK components
+        run: sdkmanager 'ndk;27.2.12479018' 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Build a synthetic arm64 APK
+        run: |
+          python3 ci/make_test_nro.py "$RUNNER_TEMP/android-test.nro"
+          python3 android_build.py "$RUNNER_TEMP/android-test.nro" -o AndroidSmoke --outdir "$RUNNER_TEMP/android-out" --sdk "$ANDROID_HOME" --ndk "$ANDROID_HOME/ndk/27.2.12479018" --jobs 4
+          python3 ci/verify_android.py "$RUNNER_TEMP/android-out/AndroidSmoke.apk"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Android-synthetic-smoke
+          path: ${{ runner.temp }}/android-out/AndroidSmoke.apk
+          retention-days: 7
+
   publish:
     name: Publish on Releases
-    needs: [version, windows]
+    needs: [version, windows, android]
     if: >-
       (github.event_name == 'push' && ((github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') || startsWith(github.ref, 'refs/tags/v')))
       || (github.event_name == 'workflow_dispatch' && inputs.version != '')

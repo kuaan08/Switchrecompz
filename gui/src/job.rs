@@ -23,6 +23,10 @@ pub struct JobConfig {
     pub title_keys: String,
     pub ticket: String,
     pub verify_only: bool,
+    pub android: bool,
+    pub android_sdk: String,
+    pub android_ndk: String,
+    pub renderer: String,
     pub out_dir: PathBuf,
     pub name: Option<String>,
     pub cc: PathBuf,
@@ -54,8 +58,24 @@ impl JobConfig {
         if self.verify_only {
             a.push("--verify-only".into());
         }
+        if self.android && !self.verify_only {
+            a.extend(["--outdir".into(), self.out_dir.clone().into()]);
+            a.extend(["--jobs".into(), self.jobs.to_string().into()]);
+            if let Some(name) = &self.name {
+                a.extend(["-o".into(), name.into()]);
+            }
+            for (flag, value) in [("--sdk", &self.android_sdk), ("--ndk", &self.android_ndk)] {
+                if !value.trim().is_empty() {
+                    a.extend([flag.into(), value.trim().into()]);
+                }
+            }
+            return a;
+        }
         if cfg!(windows) {
             a.extend(["--target", "win64"].map(OsString::from));
+            if !self.verify_only {
+                a.extend(["--renderer".into(), self.renderer.clone().into()]);
+            }
         }
         a.push("--outdir".into());
         a.push(self.out_dir.clone().into());

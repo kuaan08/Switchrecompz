@@ -88,6 +88,7 @@ enum Action {
     PickImport(u8),
     PickInputNro,
     PickOutDir,
+    PickAndroidDir(bool),
     PickIniFile(&'static str, FileFilter),
     Start,
     Verify,
@@ -284,7 +285,8 @@ impl App {
     }
 
     fn planned_exe(&self) -> Option<PathBuf> {
-        Some(self.out_dir()?.join(format!("{}{}", self.title(), std::env::consts::EXE_SUFFIX)))
+        let suffix = if self.settings.android { ".apk" } else { std::env::consts::EXE_SUFFIX };
+        Some(self.out_dir()?.join(format!("{}{}", self.title(), suffix)))
     }
 
     /// Why Recompile can't run right now.
@@ -299,7 +301,7 @@ impl App {
         if self.tc.python.is_none() {
             return Some(format!("Python 3 was not found. {}", toolchain::PYTHON_HINT));
         }
-        if !verify && self.compiler_path().is_none() {
+        if !verify && !self.settings.android && self.compiler_path().is_none() {
             return Some(match self.settings.compiler {
                 Compiler::Tcc => "TCC was not found (tcc folder).".into(),
                 Compiler::Gcc => format!("GCC was not found. {}", toolchain::GCC_HINT),
@@ -351,6 +353,7 @@ impl App {
             return;
         }
         let input = self.settings.input.trim().to_string();
+        let script = if self.settings.android && !verify { home.join("android_build.py") } else { script };
         let cfg = JobConfig {
             python,
             home,
@@ -365,6 +368,10 @@ impl App {
             title_keys: self.settings.title_keys.clone(),
             ticket: self.settings.ticket.clone(),
             verify_only: verify,
+            android: self.settings.android,
+            android_sdk: self.settings.android_sdk.clone(),
+            android_ndk: self.settings.android_ndk.clone(),
+            renderer: self.settings.renderer.clone(),
             out_dir,
             name: Some(self.title()),
             cc: self.compiler_path().unwrap_or_default(),
@@ -469,6 +476,19 @@ impl App {
                     if let Some(p) = dialog(frame, self.out_dir().as_deref()).set_title("Output folder").pick_folder() {
                         self.settings.out_dir = p.display().to_string();
                         self.rescan();
+                    }
+                }
+                Action::PickAndroidDir(ndk) => {
+                    if let Some(p) = dialog(frame, None)
+                        .set_title(if ndk { "Android NDK folder" } else { "Android SDK folder" })
+                        .pick_folder()
+                    {
+                        let value = p.display().to_string();
+                        if ndk {
+                            self.settings.android_ndk = value;
+                        } else {
+                            self.settings.android_sdk = value;
+                        }
                     }
                 }
                 Action::PickIniFile(key, (name, exts)) => {
@@ -824,6 +844,46 @@ impl App {
 
         ui.add_space(14.0);
         section(ui, "3  ·  Build output");
+        ui.horizontal(|ui| {
+            ui.selectable_value(&mut self.settings.android, false, "Windows");
+            ui.selectable_value(&mut self.settings.android, true, "Android APK (experimental)");
+        });
+        if self.settings.android {
+            ui.label(
+                "Exports an arm64 APK for Android 8+ with GLES 3.2. SDK, NDK and JDK must be installed on this PC.",
+            );
+            ui.label("Android SDK folder (blank: automatic)");
+            ui.horizontal(|ui| {
+                ui.text_edit_singleline(&mut self.settings.android_sdk);
+                if ui.button("Browse SDK…").clicked() {
+                    self.actions.push(Action::PickAndroidDir(false));
+                }
+            });
+            ui.label("Android NDK folder (blank: latest in SDK)");
+            ui.horizontal(|ui| {
+                ui.text_edit_singleline(&mut self.settings.android_ndk);
+                if ui.button("Browse NDK…").clicked() {
+                    self.actions.push(Action::PickAndroidDir(true));
+                }
+            });
+        } else if cfg!(windows) {
+            egui::ComboBox::from_id_salt("graphics_renderer").selected_text(&self.settings.renderer).show_ui(
+                ui,
+                |ui| {
+                    for (key, label) in [
+                        ("opengl", "OpenGL"),
+                        ("vulkan", "Vulkan (ANGLE, experimental)"),
+                        ("d3d11", "DirectX 11 (ANGLE, limited)"),
+                        ("d3d11-warp", "DirectX 11 WARP (software, limited)"),
+                    ] {
+                        ui.selectable_value(&mut self.settings.renderer, key.into(), label);
+                    }
+                },
+            );
+            if self.settings.renderer.starts_with("d3d11") {
+                ui.label("Compatibility mode: compute and advanced shader features are unsupported. Vulkan/OpenGL cover more features.");
+            }
+        }
         ui.label("Name");
         let hint = self.title();
         ui.add(TextEdit::singleline(&mut self.settings.name).hint_text(hint).desired_width(f32::INFINITY));
@@ -844,6 +904,17 @@ impl App {
         }
 
         ui.add_space(14.0);
+        if self.settings.android {
+            ui.label("Android uses NDK Clang; the Windows TCC/GCC selection does not apply.");
+            ui.horizontal(|ui| {
+                ui.label("Parallel jobs");
+                let mut jobs = self.jobs();
+                if ui.add(egui::Slider::new(&mut jobs, 1..=ncpu())).changed() {
+                    self.settings.jobs = jobs;
+                }
+            });
+            return;
+        }
         section(ui, "Compiler");
         let (tcc, gcc) = (self.tc.tcc.is_some(), self.tc.gcc.is_some());
         let selected = self.settings.compiler;
@@ -1032,7 +1103,8 @@ impl App {
                     );
                     ui.add_space(4.0);
                     ui.horizontal(|ui| {
-                        if ui.add(primary_button("▶  Play")).clicked() {
+                        if exe.extension().is_none_or(|ext| ext != "apk") && ui.add(primary_button("▶  Play")).clicked()
+                        {
                             self.actions.push(Action::Play(exe.clone()));
                         }
                         if let Some(game) = game
