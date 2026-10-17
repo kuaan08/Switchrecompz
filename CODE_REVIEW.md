@@ -156,3 +156,33 @@ only the public fork release metadata over HTTPS with a timeout/size limit, chec
 fixed release/asset URLs, compares development commit IDs and opens a release
 link. It does not install or execute downloaded files. Offline/API errors remain
 visible and retryable. Platform renderer/Android findings are in PLATFORM_SUPPORT.md.
+
+## Partial vertex-position exports — 2026-10-17
+
+A user report for Arcade Archives CLU CLU LAND included a frame trace, generated
+GLSL and the original vertex-shader instruction stream. The captured program
+exports position XYZ and texture-coordinate XY, but never exports position W.
+The old translator consequently emitted a GLSL vertex shader with undefined W.
+The report shows Intel HD Graphics Gen11/OpenGL 4.6 and no untranslated or failed
+shaders for that traced draw. Its log identifies the native module as TCC-built,
+regardless of the compiler choice recalled in the report.
+
+Initialize vertex position to (0, 0, 0, 1) before guest stores. Explicit guest W
+exports continue to override the default, including stores on conditional paths.
+This addresses a concrete undefined-output defect; the original game's complete
+rendering on the user's Intel driver has not been retested here.
+
+Bump the shader warm-up pack path from v3 to v4 so stale translated GLSL is not
+precompiled. Native shader binary keys already include generated GLSL source, so
+changed vertex source receives a new binary key without deleting unrelated cache
+files. The user needs an updated runtime in the game's build; replacing only the
+desktop app does not update an already generated game executable.
+
+Validation: synthetic XYZ/XYZW Maxwell programs exercise the real C translator.
+The XYZ regression fails against the old translator on desktop GLSL and GLES;
+the new translator supplies W=1 and preserves an explicit W export. An offscreen
+OpenGL 4.4 test on Mesa llvmpipe rendered a synthetic triangle using translated
+XYZ-only output: the center pixel was black before initialization and red after.
+All 34 Python tests passed locally. No uploaded game shaders, captures, logs, keys
+or game content are committed. Windows packaging remains subject to CI, and this
+is not a claim of complete game compatibility.

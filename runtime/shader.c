@@ -1201,6 +1201,10 @@ char* shader_to_glsl(const u8* code, u32 max_bytes, int stage, ShaderInfo* si){
     if(f1) sb_put(D,"float fmz(float a, float b){ return (a==0.0 || b==0.0) ? 0.0 : a*b; }\n");
     if(f2) sb_put(D,"float ffmz(float a, float b, float c){ return (a==0.0 || b==0.0) ? c : fma(a,b,c); }\n"); }
   sb_put(D,"void main(){\n");
+  /* Some VS programs export XYZ only. GLSL leaves unwritten outputs undefined;
+     give position its homogeneous default before any (possibly conditional)
+     guest stores. An explicit guest W export still overrides this value. */
+  if(c->stage==ST_VS) sb_put(D,"  gl_Position = vec4(0.0, 0.0, 0.0, 1.0);\n");
   if(c->stage==ST_VS && !g_glsl_es && !c->si->writes_point_size) sb_put(D,"  gl_PointSize = 1.0;\n");
   /* VS regs are precise. depth prepass and color pass use different shaders with the same position math;
      if the driver fuses an fma in only one of them, depths differ by an ulp and the EQUAL test fails */

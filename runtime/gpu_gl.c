@@ -2102,7 +2102,7 @@ static void APIENTRY gl_dbg(GLenum src, GLenum type, GLuint id, GLenum sev, GLsi
 /* ============================================================ shader pack
    every new program's GLSL (driver independent) gets appended to shader_cache/shader_pack.bin. at startup
    whatever isn't in the binary cache yet is compiled in the background. the pack can be moved to another PC */
-#define PACK_PATH "shader_cache/shader_pack_v3.bin"   /* versioned with the translator */
+#define PACK_PATH "shader_cache/shader_pack_v4.bin"   /* v4: initialize VS homogeneous position */
 static u64* pk_keys; static u32 pk_n, pk_cap;
 static int pk_has(u64 k){ if(!pk_cap) return 0; u32 i=(u32)(k^(k>>29))&(pk_cap-1); while(pk_keys[i]){ if(pk_keys[i]==k) return 1; i=(i+1)&(pk_cap-1); } return 0; }
 static void pk_put(u64 k){ if(!k) k=1; if(pk_n*2>=pk_cap){ u32 oc=pk_cap; u64* ok=pk_keys; pk_cap= oc? oc*2 : 4096; pk_keys=calloc(pk_cap,8); pk_n=0; for(u32 i=0;i<oc;i++) if(ok[i]) pk_put(ok[i]); free(ok); }
