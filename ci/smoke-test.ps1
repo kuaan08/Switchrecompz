@@ -16,6 +16,13 @@ if ($IsWindows) {
     $compilers = [ordered]@{ tcc = Join-Path $Root 'tcc/tcc'; gcc = 'gcc' }
     $exe = 'hello'
 }
+# Verify the Android entry point after payload unpacking using isolated mode;
+# this catches missing sibling imports with the embedded Windows Python ._pth.
+$exporter = Join-Path $Root 'android_build.py'
+if (-not (Test-Path $exporter -PathType Leaf)) { throw 'Bundled android_build.py is missing' }
+& $python -I -X utf8 $exporter --help | Out-Null
+if ($LASTEXITCODE) { throw 'Android exporter failed to import with isolated Python' }
+
 $work = Join-Path ([IO.Path]::GetTempPath()) "swr-smoke-$PID"
 New-Item -ItemType Directory -Force $work | Out-Null
 $nro = Join-Path $work 'hello.nro'
