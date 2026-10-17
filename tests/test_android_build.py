@@ -1,4 +1,6 @@
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 import xml.etree.ElementTree as ET
@@ -7,6 +9,15 @@ import android_build
 
 
 class AndroidExportTests(unittest.TestCase):
+    def test_exporter_runs_with_isolated_python(self):
+        # Windows' embedded Python uses a ._pth file: script siblings are not
+        # necessarily imported unless the exporter adds its own directory.
+        exporter = Path(android_build.__file__).resolve()
+        result = subprocess.run([sys.executable, '-I', str(exporter), '--help'],
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('--sdk', result.stdout)
+
     def test_manifest_escapes_label_and_needs_no_storage_permission(self):
         root = ET.fromstring(android_build.make_manifest('org.switchrecomp.test', 'Game & "test"'))
         ns = '{http://schemas.android.com/apk/res/android}'
