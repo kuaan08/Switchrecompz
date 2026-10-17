@@ -1,0 +1,63 @@
+# Bundled toolchains (shipped in the release zip, not in git)
+/python/
+/tcc/
+/gcc/
+/w64devkit/
+/tools/
+# OpenH264 for Linux, built by ci/toolchains.sh
+/runtime/oh264/lin/
+
+# Prebuilt binaries (switchrecomp.py --build-runtime, cargo build in gui/)
+/bin/
+/SwitchRecomp.exe
+
+# Recompiled games: GUI output folder and CLI output next to the sources
+/games/
+/*.exe
+/*.dll
+/*.so
+/*.ini
+/*.hints
+*_build/
+*_data/
+
+# Files written by a running game
+*.log
+captures/
+performance.txt
+profile.txt
+threads.txt
+lsfg_shot.ppm
+
+# GUI settings
+/SwitchRecomp.json
+
+# Rust
+target/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Editors and OS
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# CI downloads and outputs
+/.ci-cache/
+/dist/
+
+# Local extraction tools, keys and dumps must never enter source control.
+*.keys
+*.tik
+*.nsp
+*.xci
+*.nca
+*.nsz
+*.xcz
+hactool/
+SwitchRecomp.json
