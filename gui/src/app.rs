@@ -850,9 +850,7 @@ impl App {
             ui.selectable_value(&mut self.settings.android, true, "Android APK (experimental)");
         });
         if self.settings.android {
-            ui.label(
-                "Exports an arm64 APK for Android 8+ with GLES 3.2. Game compatibility is experimental.",
-            );
+            ui.label("Exports an arm64 APK for Android 8+ with GLES 3.2. Game compatibility is experimental.");
             ui.checkbox(
                 &mut self.settings.android_auto_tools,
                 "Download missing Android SDK, NDK and JDK automatically (about 1.1 GB)",
