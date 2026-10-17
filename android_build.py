@@ -17,9 +17,13 @@ import urllib.request
 import zipfile
 from xml.sax.saxutils import quoteattr
 
-import switchrecomp as swr
-
+# Embedded Windows Python uses a ._pth file and does not necessarily add the
+# script directory to sys.path. Reuse the scripts packed next to this exporter.
 HERE = Path(__file__).resolve().parent
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
+
+import switchrecomp as swr
 GL_HEADER_URL = ('https://raw.githubusercontent.com/KhronosGroup/OpenGL-Registry/'
                  '6af574a14089ccfee87efe230ebcdd8742859813/api/GL/glcorearb.h')
 GL_HEADER_SHA256 = '65fae555a8b3b5709099837001e0c14228b3e45651e2d0fa2ad22649833921e1'
