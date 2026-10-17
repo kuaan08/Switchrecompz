@@ -58,6 +58,7 @@ def main():
     shutil.copy2(executable, target / executable.name)
     shutil.copy2(source / 'LICENSE', target / 'LICENSE-hactool.txt')
     shutil.copy2(source / 'mbedtls/LICENSE', target / 'LICENSE-mbedtls.txt')
+    shutil.copy2(source / 'mbedtls/apache-2.0.txt', target / 'apache-2.0.txt')
     (target / 'SOURCE.txt').write_text('hactool by SciresM (ISC)\n'
         'https://github.com/SciresM/hactool\nCommit: ' + COMMIT + '\n'
         'Includes the mbed TLS sources vendored at that commit; see LICENSE-mbedtls.txt.\n')

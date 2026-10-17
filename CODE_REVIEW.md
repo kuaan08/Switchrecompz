@@ -43,7 +43,7 @@ review, not a full security audit or antivirus analysis of a new Windows binary.
 ## Verified locally
 
 - Python syntax compilation passed.
-- 14 synthetic importer/container/key-handling tests passed.
+- 15 synthetic importer/container/key-handling tests passed (including bundled-tool discovery).
 - Existing synthetic homebrew NRO translated and compiled with GCC.
 - Its Linux headless native program executed and logged `The game exited (code 0)`.
 - `git diff --check` passed.

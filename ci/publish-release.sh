@@ -17,8 +17,8 @@ short=${GITHUB_SHA:0:7}
 now=$(date -u '+%Y-%m-%d %H:%M UTC')
 
 about() {
-    echo "- **SwitchRecomp.exe** (Windows): one file with the app, the recompiler, the runtimes, Python, TCC and GCC."
-    echo "- **SwitchRecomp-linux-x86_64.tar.gz** (Linux): one program with the app, the recompiler, the runtimes and TCC."
+    echo "- **SwitchRecomp.exe** (Windows): one file with the app, the recompiler, the runtimes, Python, TCC, GCC and the included hactool."
+    echo "- **SwitchRecomp-linux-x86_64.tar.gz** (Linux): one program with the app, the recompiler, the runtimes, TCC and the included hactool."
     echo "  It uses the system's Python 3 and GCC."
 }
 checksums() {
@@ -35,11 +35,11 @@ if [ "$KIND" = dev ]; then
     # on the first run there is no dev tag, and gh prints the error body instead of a SHA
     [[ $prev =~ ^[0-9a-f]{40}$ ]] || prev=""
     {
-        echo "Automatic build of \`master\` at $short ($now)."
+        echo "Automatic build of \`main\` at $short ($now)."
         echo
         about
         echo
-        echo "This build is replaced by every push to master; versioned releases are the stable ones."
+        echo "This build is replaced by every push to main; versioned releases are the stable ones."
         echo
         if [ -n "$prev" ] && [ "$prev" != "$GITHUB_SHA" ]; then
             echo "### Changes since the previous development build"

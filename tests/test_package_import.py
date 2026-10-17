@@ -114,6 +114,20 @@ class ImportTests(unittest.TestCase):
             with imp.import_game(self.source, program_nca='b.nca', **self.args) as game:
                 self.assertTrue((Path(game) / 'exefs/main').is_file())
 
+    def test_bundled_extractor_is_used_without_configuration(self):
+        home = self.root / 'app'
+        tool = home / 'tools/hactool' / ('hactool.exe' if os.name == 'nt' else 'hactool')
+        tool.parent.mkdir(parents=True)
+        tool.write_bytes(b'test only')
+        def run(selected, *args, **kwargs):
+            self.assertEqual(Path(selected), tool)
+            return self.tool_result(selected, *args, **kwargs)
+        with patch.object(imp, '__file__', str(home / 'package_import.py')):
+            with patch.dict(os.environ, {'SWR_HACTOOL': '', 'SWR_TITLE_KEYS': ''}):
+                with patch.object(imp, 'run_hactool', side_effect=run):
+                    with imp.import_game(self.source, keys=str(self.keys), say=lambda _: None) as game:
+                        self.assertTrue((Path(game) / 'exefs/main').is_file())
+
     def test_missing_title_key_stops_import(self):
         with patch.object(imp, 'run_hactool', return_value='Content Type: Program\nRights ID: ' + '1' * 32):
             with self.assertRaisesRegex(ValueError, 'requires its decrypted title key'):

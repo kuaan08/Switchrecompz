@@ -247,7 +247,7 @@ list of labels such as `["self-hosted", "windows"]`).
 | Component | License | Used for |
 | --- | --- | --- |
 | hactool (SciresM), pinned source | ISC | included NSP/XCI/NCA extraction |
-| mbed TLS, vendored with hactool | Apache 2.0 / GPL 2.0 dual license | hactool crypto; license included |
+| mbed TLS, vendored with hactool | Apache 2.0 | hactool crypto; license included |
 | OpenH264 (Cisco) 2.4.1 | BSD 2-clause, `runtime\oh264\LICENSE` | game videos |
 | SPIRV-Cross (Khronos) | Apache 2.0, `runtime\spvc\LICENSE-SPIRV-Cross.txt` | LSFG shaders (Windows) |
 | texture2ddecoder | MIT, `runtime\bcn\LICENSE_texture2ddecoder.txt` | BCn textures |
