@@ -1,9 +1,7 @@
 # Builds SwitchRecomp for Windows and publishes it on the Releases page:
 #   - SwitchRecomp.exe: one file with the GUI, the recompiler, the runtimes,
 #     Python, TCC and GCC inside
-#   - SwitchRecomp-linux-x86_64.tar.gz: one program with the GUI, the recompiler,
-#     the runtimes and TCC inside; Python and GCC come from the system
-# Every push to master replaces the "dev" pre-release (Development build).
+# Every push to main replaces the "dev" pre-release (Development build).
 # Pushing a tag like v1.2.0, or running this workflow by hand with a version,
 # publishes a versioned release with generated notes. Pull requests only build
 # and upload artifacts. With a DISCORD_WEBHOOK secret, versioned releases are
@@ -13,8 +11,7 @@
 # register a Windows x64 self-hosted runner (it needs PowerShell 7 and rustup),
 # then either pick it when starting the workflow by hand, or set the repository
 # variable SWR_RUNNER to its labels: self-hosted, or a JSON list like
-# ["self-hosted", "windows"]. Linux builds on Ubuntu 22.04, so the binaries
-# also run on distributions with an older C library (glibc 2.35).
+# ["self-hosted", "windows"].
 
 name: Build
 
@@ -82,8 +79,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Cache tool downloads
-        uses: actions/cache@v6
+      - name: Restore tool downloads
+        id: tool_downloads
+        uses: actions/cache/restore@v6
         with:
           path: .ci-cache
           key: tools-${{ hashFiles('ci/toolchains.ps1') }}
@@ -91,7 +89,25 @@ jobs:
       - name: Get Python, TCC and GCC
         run: ./ci/toolchains.ps1
 
+      - name: Save verified tool downloads
+        if: steps.tool_downloads.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: .ci-cache
+          key: ${{ steps.tool_downloads.outputs.cache-primary-key }}
+
+      - name: Restore compiled Windows runtimes and hactool
+        id: native_cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            bin
+            tools/hactool
+          # Exact matches only: never reuse binaries built from different sources.
+          key: native-win-x64-v1-${{ runner.os }}-${{ runner.arch }}-${{ env.ImageVersion }}-${{ hashFiles('runtime/**', 'switchrecomp.py', 'ci/build_hactool.py', 'ci/toolchains.ps1', '.github/workflows/build.yml') }}
+
       - name: Check out pinned hactool source
+        if: steps.native_cache.outputs.cache-hit != 'true'
         uses: actions/checkout@v7
         with:
           repository: SciresM/hactool
@@ -100,20 +116,40 @@ jobs:
           persist-credentials: false
 
       - name: Build and test bundled hactool
+        if: steps.native_cache.outputs.cache-hit != 'true'
         run: ./python/python.exe ci/build_hactool.py --source .ci-build/hactool
 
       - name: Build the runtimes with GCC
+        if: steps.native_cache.outputs.cache-hit != 'true'
         run: |
           ./python/python.exe -X utf8 switchrecomp.py --build-runtime --cc w64devkit/bin/gcc.exe
           if ($LASTEXITCODE) { exit 1 }
           ./python/python.exe -X utf8 switchrecomp.py --build-runtime --backend headless --cc w64devkit/bin/gcc.exe
           if ($LASTEXITCODE) { exit 1 }
 
+      - name: Check required native files
+        run: |
+          $required = @('bin/runtime_win64_win32.exe', 'bin/runtime_win64_headless.exe',
+                        'tools/hactool/hactool.exe', 'tools/hactool/LICENSE-hactool.txt',
+                        'tools/hactool/LICENSE-mbedtls.txt', 'tools/hactool/apache-2.0.txt')
+          foreach ($file in $required) {
+            if (-not (Test-Path $file -PathType Leaf)) { throw "Missing native build output: $file" }
+          }
+
       - name: Test package import
         run: python -m unittest discover -s tests -v
 
       - name: Smoke test the recompiler
         run: ./ci/smoke-test.ps1 -Root .
+
+      - name: Save compiled Windows runtimes and hactool
+        if: steps.native_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            bin
+            tools/hactool
+          key: ${{ steps.native_cache.outputs.cache-primary-key }}
 
       - name: Set up Rust
         run: |
@@ -123,6 +159,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: gui
+          cache-on-failure: true
+          cache-workspace-crates: true
+          # Refresh the workspace snapshot when GUI sources change, while the
+          # action can still restore matching dependency caches as a fallback.
+          key: windows-workspace-v1-${{ hashFiles('gui/src/**', 'gui/build.rs', 'gui/Cargo.toml', 'gui/Cargo.lock') }}
 
       - name: Lint and test the GUI
         working-directory: gui
