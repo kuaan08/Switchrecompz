@@ -256,4 +256,7 @@ void frontend_frame(void){
     extern void save_hints(void); save_hints(); { extern void gpu_gl_rec_finish(void); gpu_gl_rec_finish(); } fflush(NULL); ExitProcess(0); }
 }
 
-int backend_glq_ok(void){ return 1; }   /* GL calls go through glq */
+/* ANGLE creates an OpenGL ES context. The desktop GL call queue rejects GLES
+   in gl_thread(), so starting it makes the game run headless despite a valid
+   ANGLE context. Create GLES directly on the GPU thread instead. */
+int backend_glq_ok(void){ return !angle_requested(); }
