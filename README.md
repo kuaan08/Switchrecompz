@@ -28,7 +28,8 @@ any copy, fork or derived work.
 | | Latest release | Development build |
 | --- | --- | --- |
 | Windows | [SwitchRecomp.exe](https://github.com/kuaan08/Switchrecompz/releases/latest/download/SwitchRecomp.exe) | [SwitchRecomp.exe](https://github.com/kuaan08/Switchrecompz/releases/download/dev/SwitchRecomp.exe) |
-| Linux (x86-64) | [SwitchRecomp-linux-x86_64.tar.gz](https://github.com/kuaan08/Switchrecompz/releases/latest/download/SwitchRecomp-linux-x86_64.tar.gz) | [SwitchRecomp-linux-x86_64.tar.gz](https://github.com/kuaan08/Switchrecompz/releases/download/dev/SwitchRecomp-linux-x86_64.tar.gz) |
+
+Linux CI builds are temporarily disabled. Current downloadable builds target Windows x64.
 
 The development build is rebuilt from every change to `master`. Every version, with
 its notes and SHA-256 checksums, is on the

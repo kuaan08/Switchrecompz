@@ -18,8 +18,7 @@ now=$(date -u '+%Y-%m-%d %H:%M UTC')
 
 about() {
     echo "- **SwitchRecomp.exe** (Windows): one file with the app, the recompiler, the runtimes, Python, TCC, GCC and the included hactool."
-    echo "- **SwitchRecomp-linux-x86_64.tar.gz** (Linux): one program with the app, the recompiler, the runtimes, TCC and the included hactool."
-    echo "  It uses the system's Python 3 and GCC."
+    echo "- Linux builds are temporarily disabled; this release targets Windows x64."
 }
 checksums() {
     echo "SHA-256:"

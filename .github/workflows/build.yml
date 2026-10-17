@@ -1,4 +1,4 @@
-# Builds SwitchRecomp for Windows and Linux and publishes both on the Releases page:
+# Builds SwitchRecomp for Windows and publishes it on the Releases page:
 #   - SwitchRecomp.exe: one file with the GUI, the recompiler, the runtimes,
 #     Python, TCC and GCC inside
 #   - SwitchRecomp-linux-x86_64.tar.gz: one program with the GUI, the recompiler,
@@ -164,101 +164,9 @@ jobs:
           path: dist/out/*
           if-no-files-found: error
 
-  linux:
-    name: Linux app
-    needs: version
-    runs-on: ubuntu-22.04
-    timeout-minutes: 60
-    env:
-      CARGO_TERM_COLOR: always
-      PYTHONDONTWRITEBYTECODE: '1'
-      SWR_VERSION: ${{ needs.version.outputs.version }}
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Install the build packages
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends nasm libx11-dev libgl-dev
-
-      - name: Cache tool downloads
-        uses: actions/cache@v6
-        with:
-          path: .ci-cache
-          key: tools-linux-${{ hashFiles('ci/toolchains.sh') }}
-
-      - name: Build TCC and OpenH264
-        run: ./ci/toolchains.sh
-
-      - name: Check out pinned hactool source
-        uses: actions/checkout@v7
-        with:
-          repository: SciresM/hactool
-          ref: 1d64a83450e025622f3468c28fc4164dad2c5ef6
-          path: .ci-build/hactool
-          persist-credentials: false
-
-      - name: Build and test bundled hactool
-        run: python3 ci/build_hactool.py --source .ci-build/hactool
-
-      - name: Build the runtimes with GCC
-        run: |
-          python3 -X utf8 switchrecomp.py --build-runtime --backend x11
-          python3 -X utf8 switchrecomp.py --build-runtime --backend headless
-
-      - name: Test package import
-        run: python3 -m unittest discover -s tests -v
-
-      - name: Smoke test the recompiler
-        shell: pwsh
-        run: ./ci/smoke-test.ps1 -Root .
-
-      - name: Set up Rust
-        run: |
-          rustup toolchain install stable --profile minimal --component clippy
-          rustup default stable
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: gui
-
-      - name: Lint and test the GUI
-        working-directory: gui
-        run: |
-          cargo clippy --all-targets --locked -- -D warnings
-          cargo test --locked
-
-      - name: Stage what the app carries
-        shell: pwsh
-        run: ./ci/stage-payload.ps1 -Out dist/payload
-
-      - name: Build the single-file app
-        working-directory: gui
-        env:
-          SWR_PAYLOAD_DIR: ${{ github.workspace }}/dist/payload
-        run: cargo build --release --locked
-
-      - name: Smoke test the single-file app
-        run: |
-          gui/target/release/SwitchRecomp --unpack "$RUNNER_TEMP/unpacked"
-          pwsh ./ci/smoke-test.ps1 -Root "$RUNNER_TEMP/unpacked"
-
-      - name: Collect
-        run: |
-          mkdir -p dist/out
-          tar -czf dist/out/SwitchRecomp-linux-x86_64.tar.gz -C gui/target/release SwitchRecomp
-          (cd dist/out && sha256sum SwitchRecomp-linux-x86_64.tar.gz > SwitchRecomp-linux-x86_64.tar.gz.sha256)
-          ls -l dist/out
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: SwitchRecomp-linux
-          path: dist/out/*
-          if-no-files-found: error
-
   publish:
     name: Publish on Releases
-    needs: [version, windows, linux]
+    needs: [version, windows]
     if: >-
       (github.event_name == 'push' && ((github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') || startsWith(github.ref, 'refs/tags/v')))
       || (github.event_name == 'workflow_dispatch' && inputs.version != '')
@@ -275,7 +183,7 @@ jobs:
 
       - uses: actions/download-artifact@v8
         with:
-          pattern: SwitchRecomp-*
+          name: SwitchRecomp-windows
           merge-multiple: true
           path: out
 
