@@ -371,6 +371,7 @@ impl App {
             android: self.settings.android,
             android_sdk: self.settings.android_sdk.clone(),
             android_ndk: self.settings.android_ndk.clone(),
+            android_auto_tools: self.settings.android_auto_tools,
             renderer: self.settings.renderer.clone(),
             out_dir,
             name: Some(self.title()),
@@ -850,8 +851,17 @@ impl App {
         });
         if self.settings.android {
             ui.label(
-                "Exports an arm64 APK for Android 8+ with GLES 3.2. SDK, NDK and JDK must be installed on this PC.",
+                "Exports an arm64 APK for Android 8+ with GLES 3.2. Game compatibility is experimental.",
             );
+            ui.checkbox(
+                &mut self.settings.android_auto_tools,
+                "Download missing Android SDK, NDK and JDK automatically (about 1.1 GB)",
+            );
+            if self.settings.android_auto_tools {
+                ui.label(
+                    "Official, SHA-256-verified downloads. Requires internet and several GB of free space. Review Android SDK and JDK licenses first; files are reused on future exports.",
+                );
+            }
             ui.label("Android SDK folder (blank: automatic)");
             ui.horizontal(|ui| {
                 ui.text_edit_singleline(&mut self.settings.android_sdk);
