@@ -6,16 +6,32 @@ Game compatibility needs device testing.
 
 ## Tools on the PC
 
-Install a JDK with java/keytool on PATH, Android SDK tools and NDK r27c:
+On Windows, choose **Android APK** and enable **Download missing Android SDK,
+NDK and JDK automatically** if you do not already have these tools. This is
+opt-in because it transfers approximately 1.1 GB and requires several GB of
+free space. The tools are downloaded from Google and Eclipse Adoptium,
+checked against fixed SHA-256 digests, and installed without administrator
+access into `%LOCALAPPDATA%/SwitchRecomp/android/toolchains`. This stable cache
+survives updates of SwitchRecomp.exe. Android Studio itself is not required.
+The app includes the Python exporter, verified graphics header and installer,
+but not the large SDK/NDK/JDK archives. No automatic download occurs unless
+this option is enabled. Android SDK/NDK and Temurin 17 remain subject to their
+respective vendor licenses; please review them before enabling downloads:
+[Android SDK terms](https://developer.android.com/studio/terms) and
+[Temurin licenses](https://adoptium.net/temurin/licensing/).
+
+Alternatively, install a JDK with java/keytool on PATH, Android SDK build tools
+and NDK r27c yourself:
 
 ```text
 sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018"
 ```
 
-Select Android APK in the output panel and browse to SDK/NDK folders. Empty
-paths use ANDROID_HOME / ANDROID_SDK_ROOT, ANDROID_NDK_HOME, or an installed NDK
-inside the SDK. The usual Windows Android Studio SDK location is also detected.
-SDK/NDK/JDK are not embedded in the single-file app.
+Select the SDK/NDK folders in the GUI or leave them blank to detect installed
+tools (ANDROID_HOME / ANDROID_SDK_ROOT / ANDROID_NDK_HOME or Android Studio's
+Windows SDK folder). An explicitly selected invalid folder is an error rather
+than being silently replaced. Automatic downloads currently support Windows
+x64 only; the existing Linux CI path installs tools separately.
 
 ## Export
 
@@ -26,6 +42,9 @@ completed APK in its folder and install on an arm64 phone with GLES 3.2.
 ```text
 python android_build.py MyGame.nsp --keys C:\keys\prod.keys --title-keys C:\keys\title.keys --sdk C:\Android\Sdk --ndk C:\Android\Sdk\ndk\27.2.12479018 --outdir games -o MyGame --jobs 4
 ```
+
+For automatic Windows setup from the command line, omit `--sdk` and `--ndk`
+and add `--auto-tools`. You can also keep manually supplied SDK/NDK paths.
 
 The program/runtime are arm64 libraries. Only selected title inputs enter the
 APK; key files do not. Original inputs are unchanged. First launch requires
