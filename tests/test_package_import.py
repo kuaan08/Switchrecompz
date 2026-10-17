@@ -74,7 +74,7 @@ class ImportTests(unittest.TestCase):
         self.tool = self.root / 'hactool'
         self.tool.write_bytes(b'test only')
         self.keys = self.root / 'prod.keys'
-        self.keys.write_text('test keys, not real')
+        self.keys.write_text('header_key = ' + '0' * 64)
         self.source = self.root / 'game.nsp'
         self.source.write_bytes(container([('program.nca', b'test encrypted content')]))
         self.args = dict(hactool=str(self.tool), keys=str(self.keys), say=lambda _: None)
@@ -162,6 +162,38 @@ class ImportTests(unittest.TestCase):
             return type('Result', (), {'returncode': 0})()
         with patch.object(imp.subprocess, 'run', side_effect=success):
             imp.run_hactool(self.tool, self.keys, self.source, ['-i'], secret)
+
+    def test_keyset_normalizes_windows_encodings(self):
+        for encoding in ['utf-8-sig', 'utf-16']:
+            self.keys.write_text('header_key = ' + '0' * 64, encoding=encoding)
+            normalized = imp.normalize_keyset(self.keys, self.root / 'normalized.keys')
+            self.assertTrue(normalized.read_bytes().startswith(b'header_key = '))
+        self.keys.write_text('master_key_00 = ' + '0' * 32)
+        with self.assertRaisesRegex(ValueError, 'header_key'):
+            imp.normalize_keyset(self.keys, self.root / 'bad.keys')
+
+    def test_error_diagnostics_never_expose_output_keys(self):
+        for raw in ['Invalid NCA header! ' + 'abcd' * 32,
+                    'Failed to read PFS0 header! ' + '1234' * 32,
+                    'SECRET KEY VALUE ' + 'ffff' * 32]:
+            result = imp.hactool_failure(raw, 1, True)
+            self.assertNotIn('abcd' * 32, result)
+            self.assertNotIn('1234' * 32, result)
+            self.assertNotIn('ffff' * 32, result)
+            self.assertIn('exit 0x00000001', result)
+        self.assertIn('crashed', imp.hactool_failure('', 0xc0000005, True))
+
+    def test_probe_uses_header_only_but_extraction_does_not(self):
+        def success(args, **kwargs):
+            self.assertIn('--suppresskeys', args)
+            if '-i' in args:
+                self.assertEqual(kwargs['env']['SWR_HACTOOL_HEADER_ONLY'], '1')
+            else:
+                self.assertNotIn('SWR_HACTOOL_HEADER_ONLY', kwargs['env'])
+            return type('Result', (), {'returncode': 0})()
+        with patch.object(imp.subprocess, 'run', side_effect=success):
+            imp.run_hactool(self.tool, self.keys, self.source, ['-i'])
+            imp.run_hactool(self.tool, self.keys, self.source, ['--exefsdir=example'])
 
     def test_title_key_parser(self):
         path = self.root / 'title.keys'

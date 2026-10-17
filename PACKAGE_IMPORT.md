@@ -93,3 +93,16 @@ The import unit tests use synthetic containers and a mocked extractor. The
 homebrew smoke test compiles and executes the existing runtime without keys or
 copyrighted game assets. Rust GUI compilation, formatting, lint and unit tests
 must run in CI; this development environment has no Rust toolchain.
+
+### Import diagnostics update
+
+The bundled hactool has a small, documented fork patch for header-only NCA
+inspection. Discovery reads content type/Rights ID without parsing encrypted
+sections; only the selected Program NCA is extracted with its matching title key.
+The extractor also receives `--suppresskeys`. Failed subprocesses report a static
+error category, phase and exit code; raw key-bearing output is never printed.
+
+UTF-8 with/without BOM and UTF-16 BOM key files are accepted. `prod.keys` must
+contain a 64-hex-character `header_key`. A UTF-8 normalized copy is created only
+inside the private temporary import directory and removed with that directory.
+No key material is copied to game output or sent to GitHub.

@@ -75,3 +75,16 @@ TLS licenses. The GUI exposes product-key and game selectors on the main screen;
 the included extractor is detected automatically, with an optional override.
 The native hactool build/PFS0 extraction test passed locally on Linux. Windows GUI
 and complete single-file packaging still require the updated CI result.
+
+## Header inspection / Windows key encoding follow-up
+
+A reported NSP import failed inside hactool but the old message concealed all
+useful diagnostics. The exact failure in that user dump is not known from that
+message alone. Fixed an independent flaw in the discovery path: upstream hactool
+can parse sections during `-i` before our importer chooses the title key. A
+bounded fork patch adds header-only discovery, validated with a synthetic NCA
+whose sections must not be parsed. Invalid headers now return a failing status.
+Also added key-file encoding normalization and validated the required header key
+format. Diagnostics use static categories plus exit code, never raw secret-bearing
+output. Eighteen Python tests and the native Linux extractor smoke tests passed;
+commercial-game decryption still needs the user's local retest.

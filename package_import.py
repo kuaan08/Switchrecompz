@@ -82,8 +82,58 @@ def package_entries(stream, extension, size):
     return partition(stream, offset, length, b'HFS0')
 
 
+def key_text(path):
+    data = Path(path).read_bytes()
+    if len(data) > MAX_TABLE:
+        raise ValueError('Key file is too large.')
+    try:
+        return data.decode('utf-16' if data.startswith((b'\xff\xfe', b'\xfe\xff')) else 'utf-8-sig')
+    except UnicodeError as exc:
+        raise ValueError('Unsupported key-file encoding. Save it as UTF-8 or UTF-16 with BOM.') from exc
+
+
+def normalize_keyset(source, target):
+    text = key_text(source)
+    match = re.search(r'^\s*header_key\s*=\s*([0-9a-fA-F]+)\s*(?:#.*)?$', text, re.MULTILINE | re.IGNORECASE)
+    if not match or len(match[1]) != 64:
+        raise ValueError('prod.keys must contain a 64-hex-character header_key to read encrypted NCA headers. Check the key file selected in the app.')
+    target.write_text(text, encoding='utf-8', newline='\n')
+    target.chmod(0o600)
+    return target
+
+
+def hactool_failure(output, code, inspection):
+    # Only static descriptions are exposed. Do not print raw output: warnings
+    # from the upstream key parser can include an entire supplied key value.
+    lower = output.lower()
+    phase = 'NCA header inspection' if inspection else 'NCA extraction'
+    status = code & 0xffffffff
+    if status in {0xc0000005, 0xc0000409, 0xc0000374}:
+        reason = 'native extractor crashed; the NCA or its encryption/section format could not be processed'
+    elif 'invalid nca header' in lower:
+        reason = 'cannot decrypt/recognize the NCA header; check header_key and whether the dump is intact'
+    elif 'failed to read nca header' in lower:
+        reason = 'NCA header is truncated or unreadable'
+    elif 'failed to read pfs0' in lower or 'pfs0 header size' in lower or 'npdm too big' in lower:
+        reason = 'ExeFS/PFS0 could not be decrypted or read; check the matching title key and dump'
+    elif 'romfs' in lower and ('failed' in lower or 'unable' in lower):
+        reason = 'RomFS could not be read; an update may need the matching base game'
+    elif 'failed to open' in lower or 'failed to write' in lower or 'permission denied' in lower:
+        reason = 'extractor could not open/read/write a required file; check permissions and free disk space'
+    elif 'unrecognized option' in lower or 'unknown option' in lower:
+        reason = 'the selected extractor does not support the required hactool arguments'
+    else:
+        reason = 'extractor returned an unclassified failure; raw output remains hidden to protect keys'
+    return '%s failed (exit 0x%08X): %s.' % (phase, status, reason)
+
+
 def run_hactool(tool, keys, archive, options, title_key=None):
-    args = [str(tool), '--disablekeywarns', '-k', str(keys), '-t', 'nca']
+    args = [str(tool), '--disablekeywarns', '--suppresskeys', '-k', str(keys), '-t', 'nca']
+    inspection = options == ['-i']
+    env = dict(os.environ)
+    env.pop('SWR_HACTOOL_HEADER_ONLY', None)
+    if inspection:
+        env['SWR_HACTOOL_HEADER_ONLY'] = '1'
     if title_key:
         args.append('--contentkey=' + title_key)
     args.extend(options)
@@ -92,14 +142,14 @@ def run_hactool(tool, keys, archive, options, title_key=None):
     with tempfile.TemporaryFile() as log:
         try:
             result = subprocess.run(args, stdin=subprocess.DEVNULL, stdout=log,
-                                    stderr=subprocess.STDOUT, timeout=1800, check=False,
+                                    stderr=subprocess.STDOUT, timeout=1800, check=False, env=env,
                                     creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise ValueError('Cannot run hactool, or extraction exceeded 30 minutes.') from exc
         log.seek(0)
         output = log.read(1024 * 1024).decode('utf-8', errors='replace')
     if result.returncode:
-        raise ValueError('hactool failed. Check your own keys and the archive; tool output is hidden to protect keys.')
+        raise ValueError(hactool_failure(output, result.returncode, inspection))
     return output
 
 
@@ -110,7 +160,7 @@ def read_title_keys(path):
     path = Path(path).expanduser()
     if not path.is_file() or path.stat().st_size > MAX_TABLE:
         raise ValueError('title.keys is missing or too large.')
-    for line in path.read_text(encoding='utf-8-sig').splitlines():
+    for line in key_text(path).splitlines():
         line = line.split('#', 1)[0].strip()
         if not line:
             continue
@@ -142,6 +192,7 @@ def import_game(source, *, hactool=None, keys=None, title_keys=None, program_nca
     say('Importing package (original file is read-only)...')
     with tempfile.TemporaryDirectory(prefix='switchrecomp-import-') as temp:
         temp = Path(temp)
+        keys = normalize_keyset(keys, temp / '__keyset.keys')
         archives = []
         if extension == '.nca':
             archives = [source]
@@ -169,7 +220,8 @@ def import_game(source, *, hactool=None, keys=None, title_keys=None, program_nca
         if program_nca:
             archives = [archive for archive in archives if archive.name.lower() == program_nca.lower()]
         candidates = []
-        for archive in archives:
+        for index, archive in enumerate(archives, 1):
+            say('Inspecting NCA %d/%d (header only)...' % (index, len(archives)))
             info = run_hactool(tool, keys, archive, ['-i'])
             if not re.search(r'Content Type:\s*Program\b', info, re.IGNORECASE):
                 continue
