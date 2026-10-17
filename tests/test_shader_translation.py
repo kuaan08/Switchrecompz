@@ -40,10 +40,11 @@ int g_texoff_emul = 0;
 #ifdef _WIN32
 __declspec(dllexport)
 #endif
-char* translate_test(const u8* code, u32 size, int stage, int es, int* unsupported) {
+char* translate_test(const u8* code, u32 size, int stage, int es, int version, int* unsupported) {
     ShaderInfo si = {0};
-    extern int g_glsl_es;
+    extern int g_glsl_es, g_glsl_es_version;
     g_glsl_es = es;
+    g_glsl_es_version = version;
     char* result = shader_to_glsl(code, size, stage, &si);
     *unsupported = si.unsupported;
     return result;
@@ -64,17 +65,16 @@ void free_test(char* text) { free(text); }
             free_library.argtypes = [ctypes.c_void_p]
             cls.addClassCleanup(free_library, cls.lib._handle)
         cls.lib.translate_test.argtypes = [ctypes.c_void_p, ctypes.c_uint32,
-                                           ctypes.c_int, ctypes.c_int,
+                                           ctypes.c_int, ctypes.c_int, ctypes.c_int,
                                            ctypes.POINTER(ctypes.c_int)]
         cls.lib.translate_test.restype = ctypes.c_void_p
         cls.lib.free_test.argtypes = [ctypes.c_void_p]
 
     def translate(self, components, es=0, version=320):
-        ctypes.c_int.in_dll(self.lib, 'g_glsl_es_version').value = version
         code = position_shader(components)
         buf = ctypes.create_string_buffer(code)
         unsupported = ctypes.c_int()
-        ptr = self.lib.translate_test(buf, len(code), 0, es, ctypes.byref(unsupported))
+        ptr = self.lib.translate_test(buf, len(code), 0, es, version, ctypes.byref(unsupported))
         self.assertTrue(ptr)
         try:
             text = ctypes.string_at(ptr).decode()
