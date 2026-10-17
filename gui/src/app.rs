@@ -409,9 +409,8 @@ impl App {
         for action in std::mem::take(&mut self.actions) {
             match action {
                 Action::PickImport(which) => {
-                    if let Some(p) = dialog(frame, None)
-                        .set_title("Select your local key file or extractor override")
-                        .pick_file()
+                    if let Some(p) =
+                        dialog(frame, None).set_title("Select your local key file or extractor override").pick_file()
                     {
                         let value = p.display().to_string();
                         match which {
@@ -729,11 +728,9 @@ impl App {
             ui.label(
                 "Override the bundled hactool only if needed. Keys stay local. Updates/DLC need a merged base dump.",
             );
-            for (which, label) in [
-                (0, "hactool override (blank uses included tool)"),
-                (1, "prod.keys"),
-                (2, "title.keys (if required)"),
-            ] {
+            for (which, label) in
+                [(0, "hactool override (blank uses included tool)"), (1, "prod.keys"), (2, "title.keys (if required)")]
+            {
                 ui.label(label);
                 ui.horizontal(|ui| {
                     let value = match which {
