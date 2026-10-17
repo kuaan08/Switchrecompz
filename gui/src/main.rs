@@ -21,6 +21,7 @@ mod payload;
 mod settings;
 mod theme;
 mod toolchain;
+mod updates;
 
 use std::path::Path;
 use std::sync::atomic::AtomicU64;
@@ -34,7 +35,7 @@ fn main() -> eframe::Result {
     }
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("SwitchRecomp")
+            .with_title("SwitchRecompz")
             .with_app_id("switchrecomp")
             .with_inner_size([1060.0, 720.0])
             .with_min_inner_size([780.0, 540.0])

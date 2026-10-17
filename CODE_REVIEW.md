@@ -138,3 +138,21 @@ invalid external ticket and conflicting tickets still fail. No guess is made for
 unknown signature types, missing fields or personalized key material.
 Twenty-seven Python tests pass; the user's NSP is unavailable locally.
 Reference: https://github.com/DarkMatterCore/nxdumptool/tree/rewrite/include/core
+
+## Imported game data copy and fork UI
+
+The user's successful import and ARM64 translation exposed a later data-copy bug:
+main passed the original NSP path to copy_data, so find_exefs returned None.
+The importer already kept its temporary folder alive for the full build; main now
+passes that imported folder and copies data before expensive analysis/translation.
+An absent ExeFS produces a clear ValueError. A synthetic NSO package-import
+fixture exercises real translation, data copy, linking and a headless runtime
+execution. CI runs this fixture with both bundled Windows compilers.
+
+Fork credits identify katakishi0 as maintainer of fork additions while retaining
+MZ Labs authorship, LICENSE and NOTICE. The interface groups game/key/output steps
+and uses a teal accent. A manual update action invokes bundled Python, fetches
+only the public fork release metadata over HTTPS with a timeout/size limit, checks
+fixed release/asset URLs, compares development commit IDs and opens a release
+link. It does not install or execute downloaded files. Offline/API errors remain
+visible and retryable. Platform renderer/Android findings are in PLATFORM_SUPPORT.md.

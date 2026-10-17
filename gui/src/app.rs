@@ -18,6 +18,7 @@ use crate::payload;
 use crate::settings::{Compiler, Settings};
 use crate::theme;
 use crate::toolchain::{self, Toolchain, Versions};
+use crate::updates;
 
 const MAX_LOG_LINES: usize = 50_000;
 const FORM_WIDTH: f32 = 420.0;
@@ -90,6 +91,7 @@ enum Action {
     PickIniFile(&'static str, FileFilter),
     Start,
     Verify,
+    CheckUpdates,
     Cancel,
     Play(PathBuf),
     Reveal(PathBuf),
@@ -108,6 +110,9 @@ pub struct App {
     unpack: Option<Unpack>,
     versions: Versions,
     versions_rx: Option<mpsc::Receiver<Versions>>,
+    update_rx: Option<mpsc::Receiver<Result<updates::Info, String>>>,
+    update_status: String,
+    update_link: Option<String>,
     settings: Settings,
     saved: Settings,
     last_save: Instant,
@@ -150,6 +155,9 @@ impl App {
             unpack,
             versions: Versions::default(),
             versions_rx: None,
+            update_rx: None,
+            update_status: "Check the fork release when you choose. Updates open on GitHub.".into(),
+            update_link: None,
             saved: settings.clone(),
             settings,
             last_save: Instant::now(),
@@ -473,6 +481,22 @@ impl App {
                 }
                 Action::Start => self.start(ctx, false),
                 Action::Verify => self.start(ctx, true),
+                Action::CheckUpdates => {
+                    if self.update_rx.is_none()
+                        && let (Some(python), Some(home)) = (self.tc.python.clone(), self.tc.home.clone())
+                    {
+                        let (tx, rx) = mpsc::channel();
+                        let context = ctx.clone();
+                        std::thread::spawn(move || {
+                            let _ = tx.send(updates::check(&python, &home));
+                            context.request_repaint();
+                        });
+                        self.update_rx = Some(rx);
+                        self.update_status = "Checking GitHub releases…".into();
+                        self.update_link = None;
+                        self.tab = Tab::About;
+                    }
+                }
                 Action::Cancel => {
                     if let Some(job) = &mut self.job {
                         job.cancel();
@@ -543,8 +567,8 @@ impl App {
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     logo(ui, 26.0);
-                    ui.label(RichText::new("SwitchRecomp").size(19.0).strong().color(Color32::WHITE));
-                    ui.add_space(18.0);
+                    ui.label(RichText::new("SwitchRecompz").size(19.0).strong().color(Color32::WHITE));
+                    ui.add_space(12.0);
                     let library = if self.games.is_empty() {
                         "Library".to_string()
                     } else {
@@ -559,6 +583,9 @@ impl App {
                             }
                             self.tab = tab;
                         }
+                    }
+                    if ui.add_enabled(self.update_rx.is_none(), egui::Button::new("Updates")).clicked() {
+                        self.actions.push(Action::CheckUpdates);
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         let v = &self.versions;
@@ -579,7 +606,9 @@ impl App {
             .show(ui, |ui| {
                 // credit first, so a long path is cut short instead of running into it
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.label(RichText::new("SwitchRecomp by MZ Labs").small().color(theme::TEXT_WEAK));
+                    ui.label(
+                        RichText::new("Fork: katakishi0  ·  SwitchRecomp by MZ Labs").small().color(theme::TEXT_WEAK),
+                    );
                     ui.add_space(16.0);
                     ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                         ui.add(Label::new(RichText::new(text).small().color(color)).truncate());
@@ -705,7 +734,7 @@ impl App {
     }
 
     fn form(&mut self, ui: &mut Ui) {
-        section(ui, "Game");
+        section(ui, "1  ·  Choose a game");
         ui.add(
             TextEdit::singleline(&mut self.settings.input)
                 .hint_text("Folder, .nsp, .xci, .nca or .nro")
@@ -742,7 +771,8 @@ impl App {
         }
         ui.add_space(4.0);
         self.input_status(ui);
-        ui.label("hactool is included in release builds. Select your own prod.keys before importing a package.");
+        section(ui, "2  ·  Keys and verification");
+        ui.label("Select your key files, then verify the game before compiling.");
         ui.label(
             "Keys are checked against the selected game. Common tickets inside NSP/XCI are detected automatically.",
         );
@@ -793,7 +823,7 @@ impl App {
         });
 
         ui.add_space(14.0);
-        section(ui, "Output");
+        section(ui, "3  ·  Build output");
         ui.label("Name");
         let hint = self.title();
         ui.add(TextEdit::singleline(&mut self.settings.name).hint_text(hint).desired_width(f32::INFINITY));
@@ -1148,7 +1178,7 @@ impl App {
                 ui.horizontal(|ui| {
                     logo(ui, 40.0);
                     ui.vertical(|ui| {
-                        ui.label(RichText::new("SwitchRecomp").size(24.0).strong().color(Color32::WHITE));
+                        ui.label(RichText::new("SwitchRecompz").size(24.0).strong().color(Color32::WHITE));
                         ui.label(
                             RichText::new(format!(
                                 "Static recompiler for Nintendo Switch games  ·  {}",
@@ -1221,8 +1251,27 @@ impl App {
                 });
 
                 ui.add_space(14.0);
+                section(ui, "Fork updates");
+                card(ui, theme::BORDER, |ui| {
+                    ui.label(format!("Installed: {}", env!("SWR_BUILD")));
+                    ui.label(&self.update_status);
+                    if ui.add_enabled(self.update_rx.is_none(), egui::Button::new("Check for updates")).clicked() {
+                        self.actions.push(Action::CheckUpdates);
+                    }
+                    if let Some(url) = &self.update_link {
+                        ui.hyperlink_to("Open release and download", url);
+                    }
+                    ui.hyperlink_to("Fork source", "https://github.com/kuaan08/Switchrecompz");
+                });
+                ui.add_space(14.0);
                 section(ui, "Credits");
                 card(ui, theme::BORDER, |ui| {
+                    ui.label(RichText::new("Fork additions maintained by katakishi0").strong().color(theme::ACCENT));
+                    ui.label(
+                        "Package import, key selectors, validation, workflow and interface additions in this fork.",
+                    );
+                    ui.hyperlink_to("katakishi0", "https://github.com/katakishi0");
+                    ui.add_space(6.0);
                     ui.label(RichText::new("SwitchRecomp by MZ Labs").strong().color(Color32::WHITE));
                     ui.label(
                         "Licensed under the Apache License 2.0. Copies, forks and builds made with it must keep \
@@ -1396,6 +1445,22 @@ impl eframe::App for App {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_unpack(ctx);
         self.poll_job();
+        if let Some(rx) = &self.update_rx
+            && let Ok(result) = rx.try_recv()
+        {
+            match result {
+                Ok(info) => {
+                    self.update_status = if info.current {
+                        format!("You have the published development build: {}", info.name)
+                    } else {
+                        format!("A different development build is published: {}", info.name)
+                    };
+                    self.update_link = Some(info.url);
+                }
+                Err(message) => self.update_status = message,
+            }
+            self.update_rx = None;
+        }
         if let Some(rx) = &self.versions_rx
             && let Ok(v) = rx.try_recv()
         {

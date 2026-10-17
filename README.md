@@ -1,4 +1,4 @@
-# SwitchRecomp — Package Import Development
+# SwitchRecompz — Package Import Development
 
 Based on **SwitchRecomp by MZ Labs**. This development source adds experimental
 `.nsp`, `.xci` and `.nca` import through the included hactool and your own
@@ -6,6 +6,15 @@ keys. See [PACKAGE_IMPORT.md](PACKAGE_IMPORT.md) for setup, supported inputs and
 limitations, and [CODE_REVIEW.md](CODE_REVIEW.md) for review/test results.
 
 **Fork:** https://github.com/kuaan08/Switchrecompz
+
+**Fork additions maintained by [katakishi0](https://github.com/katakishi0).**
+Original SwitchRecomp authorship remains with MZ Labs.
+
+The desktop app includes a manual **Check for updates** action for this fork. It
+compares the installed development commit with the published release and opens
+the GitHub release page. Source and release links remain under kuaan08/Switchrecompz.
+See [PLATFORM_SUPPORT.md](PLATFORM_SUPPORT.md) for Vulkan, DirectX and Android
+implementation status and the primary projects studied.
 
 Downloads below refer to this repository. A development executable is available
 only after its GitHub Actions build succeeds; see the Actions tab for status.

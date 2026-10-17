@@ -328,6 +328,8 @@ def copy_data(mods, npdm, romfs, entry, datadir, say):
     # compare contents, not sizes: after a game update main.npdm (and sometimes an NSO) keeps its
     # size, and the runtime refuses an NSO whose build id differs from the recompiled one
     src = nxloader.find_exefs(entry)
+    if src is None:
+        raise ValueError('Cannot copy game data: no extracted ExeFS found. Use the imported game folder.')
     for n in os.listdir(src):
         s = os.path.join(src, n); d = os.path.join(ex, n)
         if os.path.isfile(s) and not (os.path.isfile(d) and filecmp.cmp(s, d, shallow=False)):
@@ -434,6 +436,10 @@ def main():
                     try: hints.append(int(ln.strip(), 16))
                     except ValueError: pass
             say('Previous execution hints: %d' % len(hints))
+        # Copy while the import context still owns the extracted directory.
+        # Validate the source before expensive analysis/translation.
+        datadir = base + '_data'
+        copy_data(mods, npdm, romfs, game_input, datadir, say)
         prog = codegen.Program(mods, hints)
         if a.interp_only:
             prog.funcs = {}; prog.extra_entries = set()
@@ -444,8 +450,6 @@ def main():
         os.makedirs(build, exist_ok=True)
         say('Translating ARM64 to C...')
         files = gen_module(prog, mods, npdm, build, title, a.chunk, say)
-        datadir = base + '_data'
-        copy_data(mods, npdm, romfs, a.input, datadir, say)
         if not os.path.exists(base + '.ini'):
             with open(base + '.ini', 'w', encoding='utf-8') as fo: fo.write(INI % {'title': title})
         if a.no_build: return

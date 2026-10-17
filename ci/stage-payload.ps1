@@ -27,7 +27,7 @@ foreach ($rt in $runtimes) {
 }
 if (Test-Path $Out) { Remove-Item -Recurse -Force $Out }
 New-Item -ItemType Directory -Force $Out | Out-Null
-Copy-Item 'switchrecomp.py', 'package_import.py', 'nxloader.py', 'codegen.py', 'a64.py', 'LICENSE.txt', 'NOTICE.txt', 'README.md', 'PACKAGE_IMPORT.md', 'CODE_REVIEW.md' $Out
+Copy-Item 'switchrecomp.py', 'update_check.py', 'package_import.py', 'nxloader.py', 'codegen.py', 'a64.py', 'LICENSE.txt', 'NOTICE.txt', 'README.md', 'PACKAGE_IMPORT.md', 'CODE_REVIEW.md', 'PLATFORM_SUPPORT.md' $Out
 foreach ($dir in @('runtime', 'bin') + $tools) {
     Copy-Item $dir $Out -Recurse
 }
