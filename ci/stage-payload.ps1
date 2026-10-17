@@ -31,6 +31,19 @@ Copy-Item 'switchrecomp.py', 'android_build.py', 'update_check.py', 'package_imp
 foreach ($dir in @('runtime', 'bin') + $tools) {
     Copy-Item $dir $Out -Recurse
 }
+# Android's native runtime needs the Khronos GL header. Fetch its pinned,
+# SHA-256-verified version at release-build time, not on the user's first export.
+if ($IsWindows) {
+    & python -c 'import android_build; android_build.graphics_headers()'
+    if ($LASTEXITCODE) { throw 'Could not stage the Android graphics headers' }
+    $headerRoot = '.ci-cache/graphics-headers/include'
+    if (-not (Test-Path "$headerRoot/GL/glcorearb.h" -PathType Leaf)) {
+        throw 'Verified Android graphics header is missing'
+    }
+    $dest = Join-Path $Out '.ci-cache/graphics-headers'
+    New-Item -ItemType Directory -Force $dest | Out-Null
+    Copy-Item $headerRoot $dest -Recurse
+}
 Get-ChildItem $Out -Recurse -Directory -Filter __pycache__ | Remove-Item -Recurse -Force
 $size = (Get-ChildItem $Out -Recurse -File | Measure-Object Length -Sum).Sum / 1MB
 Write-Host ("Staged {0:N0} MB in {1}" -f $size, (Resolve-Path $Out))
