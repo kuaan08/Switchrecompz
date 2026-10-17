@@ -26,6 +26,7 @@ pub struct JobConfig {
     pub android: bool,
     pub android_sdk: String,
     pub android_ndk: String,
+    pub android_auto_tools: bool,
     pub renderer: String,
     pub out_dir: PathBuf,
     pub name: Option<String>,
@@ -68,6 +69,9 @@ impl JobConfig {
                 if !value.trim().is_empty() {
                     a.extend([flag.into(), value.trim().into()]);
                 }
+            }
+            if self.android_auto_tools {
+                a.push("--auto-tools".into());
             }
             return a;
         }
