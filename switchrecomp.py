@@ -379,6 +379,8 @@ def main():
     ap.add_argument('--hactool', help='path to your hactool executable')
     ap.add_argument('--keys', help='path to your prod.keys')
     ap.add_argument('--title-keys', help='path to your decrypted title.keys')
+    ap.add_argument('--ticket', help='optional common .tik from your own game dump')
+    ap.add_argument('--verify-only', action='store_true', help='verify import, decryption and module loading without compiling')
     ap.add_argument('--program-nca', help='Program NCA filename for a multi-title package')
     a = ap.parse_args()
     say = (lambda m: None) if a.quiet else (lambda m: print(m, flush=True))
@@ -397,11 +399,11 @@ def main():
     if not a.input: ap.error('the game folder or .nro file is required')
     # check the compiler first, not after minutes of translation
     cc = None
-    if not a.no_build:
+    if not a.no_build and not a.verify_only:
         cc = find_cc(a.cc, target_win)
         if not cc: raise SystemExit('C compiler not found: %s' % a.cc if a.cc else 'No C compiler found (gcc, clang or tcc).')
     say('SwitchRecomp - use your own copy of the game. No games or keys included.')
-    with import_game(a.input, hactool=a.hactool, keys=a.keys, title_keys=a.title_keys,
+    with import_game(a.input, hactool=a.hactool, keys=a.keys, title_keys=a.title_keys, ticket=a.ticket,
                      program_nca=a.program_nca, say=say) as game_input:
         try:
             mods, npdm, romfs = nxloader.load_program(game_input)
@@ -410,6 +412,9 @@ def main():
         for m in mods:
             say('  %-8s %010X  code %.1f MB  .eh_frame functions %d' % (m.name, m.base, m.text[1] / 1048576.0, len(m.fde)))
         info = nxloader.parse_npdm(npdm)
+        if a.verify_only:
+            say('Verification passed: import/decryption and %d module(s) loaded. Runtime compatibility is not tested.' % len(mods))
+            return
         # a folder name is used as is ("Game v1.0" must not lose ".0"), a file loses its extension
         src_name = os.path.basename(os.path.normpath(a.input))
         if os.path.isfile(a.input): src_name = os.path.splitext(src_name)[0]

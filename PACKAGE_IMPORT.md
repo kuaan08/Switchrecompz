@@ -34,8 +34,13 @@ upstream release EXE does not include these changes. In the modified GUI:
 2. Click **Open NSP / XCI / NCA / NRO…** and select your own game dump, or drag it onto the app.
 3. Choose the compiler and press **Recompile**. The included hactool is selected automatically.
 4. Rights-managed games also need your own decrypted `title.keys`; select it under
-   **Advanced import options / title.keys**. Each entry is `rights_id = key`,
-   with 32 hexadecimal characters on each side. Tickets are not imported automatically.
+   **Select title.keys…** on the main screen. Each entry is `rights_id = decrypted_key`,
+   with 32 hexadecimal characters on each side. Common tickets in the package are
+   detected automatically when no matching decrypted entry is present. An external
+   common `.tik` can also be selected on the main screen. Personalized tickets
+   require a decrypted key exported from your console.
+5. **Verify game and keys** checks import/decryption and module loading without
+   compiling, launching or writing a game output. It uses temporary disk space.
 
 Release builds include hactool, built from the official SciresM repository at
 `1d64a83450e025622f3468c28fc4164dad2c5ef6`, plus its vendored mbed TLS and licenses.
@@ -60,8 +65,8 @@ python3 switchrecomp.py MyGame.nca --hactool /opt/hactool --keys /private/prod.k
 
 Optional environment defaults: `SWR_HACTOOL`, `SWR_PROD_KEYS`, `SWR_TITLE_KEYS`.
 The bundled extractor is preferred over PATH; `~/.switch/prod.keys` is also detected.
-All key files stay local. The decrypted title key, when needed, is supplied to
-hactool via its `--contentkey` argument. Local process inspection by the same
+All key files stay local. Decrypted title keys use hactool `--contentkey`;
+encrypted common-ticket keys use `--titlekey` and your product keyset. Local process inspection by the same
 user or an administrator can see that argument. Do not share process traces.
 
 ## Validation and disk use
@@ -111,3 +116,21 @@ Malformed indexed master KEK derivation sources are omitted from the temporary
 keyset only if the corresponding valid-length derived master key is supplied.
 The log reports the count. Values are never truncated, and the original file is
 unchanged. Otherwise import stops with an entry-name-only format diagnostic.
+
+## Ticket matching and verification
+
+`--ticket /path/to/game.tik` selects an optional external common ticket.
+`--verify-only` runs the same import and nxloader module checks, then exits before
+code generation or compilation. The GUI exposes both options. A successful check
+is not a gameplay compatibility or ticket-signature authenticity test.
+
+The importer matches the complete rights ID, never just a title name or filename.
+Selected decrypted title.keys entries take priority; common ticket keys are used
+only as a fallback. Conflicting duplicate entries/tickets are rejected.
+Ticket reads are bounded to 64 KiB; signature-dependent data offsets, minimum data
+length, version and key type are checked. Personalized RSA tickets are identified
+and never treated as common AES tickets. No tickets or supplied keys are stored
+in source, generated game data or release artifacts.
+Format reference: https://switchbrew.org/wiki/Ticket
+Extractor behavior: pinned SciresM/hactool main.c and nca.c (`--titlekey` versus
+`--contentkey`).

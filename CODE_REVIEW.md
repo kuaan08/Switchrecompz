@@ -100,3 +100,21 @@ with a key-name-only diagnostic. No supplied values are included in this reposit
 Nineteen Python tests pass. A synthetic plaintext NCA header probe with the
 normalized supplied keyset passes the native extractor; this verifies parser
 progress, not commercial-game decryption or the correctness of the supplied keys.
+
+## Rights-managed import and validation review
+
+Reviewed package parsing, title-key matching, hactool argument semantics, GUI
+settings/pickers, worker lifecycle, CLI compile entry and nxloader module-loading
+checks for the reported failure. Existing runtime/translation sources remain an
+experimental compatibility implementation; this is not a full security audit of
+the entire vendored codebase or proof of commercial-game compatibility.
+
+The previous importer discarded embedded tickets and reported an absent match as
+though no title.keys file had been selected. Common tickets are now parsed with
+bounds and exact rights-ID matching, with encrypted and decrypted keys kept
+distinct. Personalized tickets and conflicts stop with actionable static errors.
+Missing matches report entry counts without logging key material. GUI selectors
+for product keys, title keys and optional external tickets are directly visible.
+Verification uses the normal importer and module loader without compilation.
+Synthetic tests cover signature layouts, truncation, common/personalized ticket
+behavior, matching, precedence, duplicates and correct hactool arguments.

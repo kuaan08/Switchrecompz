@@ -21,6 +21,8 @@ pub struct JobConfig {
     pub hactool: String,
     pub prod_keys: String,
     pub title_keys: String,
+    pub ticket: String,
+    pub verify_only: bool,
     pub out_dir: PathBuf,
     pub name: Option<String>,
     pub cc: PathBuf,
@@ -38,13 +40,19 @@ impl JobConfig {
         a.extend(["-u", "-X", "utf8"].map(OsString::from));
         a.push(self.script.clone().into());
         a.push(self.input.clone().into());
-        for (flag, value) in
-            [("--hactool", &self.hactool), ("--keys", &self.prod_keys), ("--title-keys", &self.title_keys)]
-        {
+        for (flag, value) in [
+            ("--hactool", &self.hactool),
+            ("--keys", &self.prod_keys),
+            ("--title-keys", &self.title_keys),
+            ("--ticket", &self.ticket),
+        ] {
             if !value.trim().is_empty() {
                 a.push(flag.into());
                 a.push(value.trim().into());
             }
+        }
+        if self.verify_only {
+            a.push("--verify-only".into());
         }
         if cfg!(windows) {
             a.extend(["--target", "win64"].map(OsString::from));

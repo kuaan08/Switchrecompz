@@ -38,6 +38,7 @@ struct LogLine {
 
 enum Outcome {
     Success(PathBuf),
+    Verified,
     Failed(Option<i32>),
     Cancelled,
 }
@@ -88,6 +89,7 @@ enum Action {
     PickOutDir,
     PickIniFile(&'static str, FileFilter),
     Start,
+    Verify,
     Cancel,
     Play(PathBuf),
     Reveal(PathBuf),
@@ -112,6 +114,7 @@ pub struct App {
     tab: Tab,
     inspected: Option<(String, Result<GameInfo, String>, Instant)>,
     job: Option<Job>,
+    verifying: bool,
     progress: Progress,
     elapsed: Duration,
     log: Vec<LogLine>,
@@ -153,6 +156,7 @@ impl App {
             tab: Tab::Recompile,
             inspected: None,
             job: None,
+            verifying: false,
             progress: Progress::default(),
             elapsed: Duration::ZERO,
             log: Vec::new(),
@@ -277,13 +281,17 @@ impl App {
 
     /// Why Recompile can't run right now.
     fn blocker(&self) -> Option<String> {
+        self.blocker_for(false)
+    }
+
+    fn blocker_for(&self, verify: bool) -> Option<String> {
         if self.tc.home.is_none() {
             return Some("switchrecomp.py was not found next to the app.".into());
         }
         if self.tc.python.is_none() {
             return Some(format!("Python 3 was not found. {}", toolchain::PYTHON_HINT));
         }
-        if self.compiler_path().is_none() {
+        if !verify && self.compiler_path().is_none() {
             return Some(match self.settings.compiler {
                 Compiler::Tcc => "TCC was not found (tcc folder).".into(),
                 Compiler::Gcc => format!("GCC was not found. {}", toolchain::GCC_HINT),
@@ -321,16 +329,16 @@ impl App {
 
     // ------------------------------------------------------------------ job
 
-    fn start(&mut self, ctx: &egui::Context) {
-        if self.job.is_some() || self.blocker().is_some() {
+    fn start(&mut self, ctx: &egui::Context, verify: bool) {
+        if self.job.is_some() || self.blocker_for(verify).is_some() {
             return;
         }
-        let (Some(home), Some(script), Some(python), Some(cc), Some(out_dir)) =
-            (self.tc.home.clone(), self.tc.script(), self.tc.python.clone(), self.compiler_path(), self.out_dir())
+        let (Some(home), Some(script), Some(python), Some(out_dir)) =
+            (self.tc.home.clone(), self.tc.script(), self.tc.python.clone(), self.out_dir())
         else {
             return;
         };
-        if let Err(e) = std::fs::create_dir_all(&out_dir) {
+        if !verify && let Err(e) = std::fs::create_dir_all(&out_dir) {
             self.notify(format!("Cannot create {}: {e}", out_dir.display()), true);
             return;
         }
@@ -347,9 +355,11 @@ impl App {
             },
             prod_keys: self.settings.prod_keys.clone(),
             title_keys: self.settings.title_keys.clone(),
+            ticket: self.settings.ticket.clone(),
+            verify_only: verify,
             out_dir,
             name: Some(self.title()),
-            cc,
+            cc: self.compiler_path().unwrap_or_default(),
             gcc: self.settings.compiler == Compiler::Gcc,
             opt_level: self.settings.opt_level,
             native: self.settings.native,
@@ -363,6 +373,7 @@ impl App {
         match Job::start(&cfg, ctx) {
             Ok(job) => {
                 self.job = Some(job);
+                self.verifying = verify;
                 self.outcome = None;
                 self.settings.remember_input(&input);
             }
@@ -395,6 +406,8 @@ impl App {
         let (phase, outcome) = if cancelled {
             self.push_log("Cancelled.".into());
             (Phase::Cancelled, Outcome::Cancelled)
+        } else if code == Some(0) && self.verifying {
+            (Phase::Done, Outcome::Verified)
         } else if code == Some(0) {
             let exe = self.progress.exe.clone().or_else(|| self.planned_exe()).unwrap_or_default();
             (Phase::Done, Outcome::Success(exe))
@@ -409,14 +422,19 @@ impl App {
         for action in std::mem::take(&mut self.actions) {
             match action {
                 Action::PickImport(which) => {
-                    if let Some(p) =
-                        dialog(frame, None).set_title("Select your local key file or extractor override").pick_file()
-                    {
+                    let (title, label, extensions): (&str, &str, &[&str]) = match which {
+                        0 => ("Select hactool override", "Executable", &["exe"]),
+                        1 => ("Select product keys (prod.keys)", "Key files", &["keys", "txt"]),
+                        2 => ("Select title keys (title.keys)", "Key files", &["keys", "txt"]),
+                        _ => ("Select your game ticket (.tik)", "Ticket", &["tik"]),
+                    };
+                    if let Some(p) = dialog(frame, None).set_title(title).add_filter(label, extensions).pick_file() {
                         let value = p.display().to_string();
                         match which {
                             0 => self.settings.hactool = value,
                             1 => self.settings.prod_keys = value,
-                            _ => self.settings.title_keys = value,
+                            2 => self.settings.title_keys = value,
+                            _ => self.settings.ticket = value,
                         }
                     }
                 }
@@ -453,7 +471,8 @@ impl App {
                         ed.changed = true;
                     }
                 }
-                Action::Start => self.start(ctx),
+                Action::Start => self.start(ctx, false),
+                Action::Verify => self.start(ctx, true),
                 Action::Cancel => {
                     if let Some(job) = &mut self.job {
                         job.cancel();
@@ -693,7 +712,7 @@ impl App {
                 .desired_width(f32::INFINITY),
         );
         let mut picked_recent = None;
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if ui.button("🗁  Folder…").clicked() {
                 self.actions.push(Action::PickInputFolder);
             }
@@ -702,6 +721,9 @@ impl App {
             }
             if ui.button("🔑  Select prod.keys…").clicked() {
                 self.actions.push(Action::PickImport(1));
+            }
+            if ui.button("🔑  Select title.keys…").clicked() {
+                self.actions.push(Action::PickImport(2));
             }
             if !self.settings.recent.is_empty() {
                 ui.menu_button("Recent  ⏷", |ui| {
@@ -721,29 +743,53 @@ impl App {
         ui.add_space(4.0);
         self.input_status(ui);
         ui.label("hactool is included in release builds. Select your own prod.keys before importing a package.");
-        if !self.settings.prod_keys.trim().is_empty() {
-            ui.label(format!("prod.keys: {}", self.settings.prod_keys));
+        ui.label(
+            "Keys are checked against the selected game. Common tickets inside NSP/XCI are detected automatically.",
+        );
+        for (which, label) in [
+            (1, "Product keys (prod.keys)"),
+            (2, "Title keys (title.keys, if needed)"),
+            (3, "External common ticket (.tik, optional)"),
+        ] {
+            ui.label(label);
+            ui.horizontal(|ui| {
+                let value = match which {
+                    1 => &mut self.settings.prod_keys,
+                    2 => &mut self.settings.title_keys,
+                    _ => &mut self.settings.ticket,
+                };
+                ui.add(TextEdit::singleline(value).desired_width((ui.available_width() - 95.0).max(60.0)));
+                if ui.button("Browse…").clicked() {
+                    self.actions.push(Action::PickImport(which));
+                }
+                if ui.button("Clear").clicked() {
+                    value.clear();
+                }
+            });
         }
-        ui.collapsing("Advanced import options / title.keys", |ui| {
-            ui.label(
-                "Override the bundled hactool only if needed. Keys stay local. Updates/DLC need a merged base dump.",
-            );
-            for (which, label) in
-                [(0, "hactool override (blank uses included tool)"), (1, "prod.keys"), (2, "title.keys (if required)")]
-            {
-                ui.label(label);
-                ui.horizontal(|ui| {
-                    let value = match which {
-                        0 => &mut self.settings.hactool,
-                        1 => &mut self.settings.prod_keys,
-                        _ => &mut self.settings.title_keys,
-                    };
-                    ui.add(TextEdit::singleline(value).desired_width((ui.available_width() - 42.0).max(60.0)));
-                    if ui.button("…").clicked() {
-                        self.actions.push(Action::PickImport(which));
-                    }
-                });
-            }
+        if ui
+            .add_enabled(
+                self.job.is_none() && self.blocker_for(true).is_none(),
+                egui::Button::new("Verify game and keys"),
+            )
+            .clicked()
+        {
+            self.actions.push(Action::Verify);
+        }
+        ui.label(
+            "Verification extracts and checks modules in temporary storage; it does not compile or launch the game.",
+        );
+        ui.collapsing("Advanced extractor override", |ui| {
+            ui.label("hactool is bundled. Leave blank to use it.");
+            ui.horizontal(|ui| {
+                ui.add(
+                    TextEdit::singleline(&mut self.settings.hactool)
+                        .desired_width((ui.available_width() - 80.0).max(60.0)),
+                );
+                if ui.button("Browse…").clicked() {
+                    self.actions.push(Action::PickImport(0));
+                }
+            });
         });
 
         ui.add_space(14.0);
@@ -937,6 +983,12 @@ impl App {
             return;
         }
         match &self.outcome {
+            Some(Outcome::Verified) => {
+                card(ui, theme::SUCCESS, |ui| {
+                    ui.label(RichText::new("Game and keys verified").strong().color(theme::SUCCESS));
+                    ui.label("Import/decryption and module loading passed. Runtime compatibility is not tested.");
+                });
+            }
             Some(Outcome::Success(exe)) => {
                 let exe = exe.clone();
                 let name = exe.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();

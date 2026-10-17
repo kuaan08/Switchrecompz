@@ -21,6 +21,7 @@ pub struct Settings {
     pub hactool: String,
     pub prod_keys: String,
     pub title_keys: String,
+    pub ticket: String,
     pub name: String,
     /// Empty means the games folder next to switchrecomp.py.
     pub out_dir: String,
@@ -40,6 +41,7 @@ impl Default for Settings {
             hactool: String::new(),
             prod_keys: String::new(),
             title_keys: String::new(),
+            ticket: String::new(),
             name: String::new(),
             out_dir: String::new(),
             compiler: Compiler::Tcc,

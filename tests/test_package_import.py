@@ -19,6 +19,17 @@ def container(files, magic=b'PFS0'):
     return magic + struct.pack('<III', len(files), len(names), 0) + table + names + payload
 
 
+def ticket(rights='1' * 32, kind=0, signature=0x10004):
+    base = {0x10003: 0x240, 0x10004: 0x140, 0x10005: 0x80}[signature]
+    data = bytearray(base + 0x2c0)
+    data[:4] = signature.to_bytes(4, 'big')
+    data[base + 0x140] = 2
+    data[base + 0x141] = kind
+    data[base + 0x40:base + 0x50] = bytes.fromhex('a' * 32)
+    data[base + 0x160:base + 0x170] = bytes.fromhex(rights)
+    return bytes(data)
+
+
 class ContainerTests(unittest.TestCase):
     def test_nsp_ranges_and_streaming_contents(self):
         raw = container([('a.nca', b'AAA'), ('b.nca', b'BBBB')])
@@ -171,6 +182,70 @@ class ImportTests(unittest.TestCase):
         self.keys.write_text('master_key_00 = ' + '0' * 32)
         with self.assertRaisesRegex(ValueError, 'header_key'):
             imp.normalize_keyset(self.keys, self.root / 'bad.keys')
+
+    def test_ticket_layout_and_personalized_type(self):
+        for signature in [0x10003, 0x10004, 0x10005]:
+            self.assertEqual(imp.read_ticket(ticket(signature=signature)), ('1' * 32, 'a' * 32))
+        self.assertEqual(imp.read_ticket(ticket(kind=1)), ('1' * 32, None))
+        for bad in [b'', ticket()[:20], bytes(0x400), ticket(kind=2)]:
+            with self.assertRaises(ValueError):
+                imp.read_ticket(bad)
+        mapping = {}
+        imp.add_ticket(mapping, ticket())
+        with self.assertRaisesRegex(ValueError, 'Conflicting'):
+            imp.add_ticket(mapping, ticket(kind=1))
+
+    def test_embedded_common_ticket_fallback(self):
+        self.source.write_bytes(container([('program.nca', b'nca'), ('game.tik', ticket())]))
+        calls = []
+        def tool(tool, keys, archive, options, title_key=None, encrypted_title_key=False):
+            if options == ['-i']:
+                return 'Content Type: Program\nRights ID: ' + '1' * 32
+            calls.append((title_key, encrypted_title_key))
+            return self.tool_result(tool, keys, archive, options, title_key)
+        with patch.object(imp, 'run_hactool', side_effect=tool):
+            with imp.import_game(self.source, **self.args):
+                pass
+        self.assertEqual(calls, [('a' * 32, True)])
+
+    def test_external_ticket_and_title_keys_precedence(self):
+        external = self.root / 'game.tik'
+        external.write_bytes(ticket())
+        titlekeys = self.root / 'title.keys'
+        titlekeys.write_text('1' * 32 + ' = ' + 'b' * 32)
+        calls = []
+        def tool(tool, keys, archive, options, title_key=None, encrypted_title_key=False):
+            if options == ['-i']:
+                return 'Content Type: Program\nRights ID: ' + '1' * 32
+            calls.append((title_key, encrypted_title_key))
+            return self.tool_result(tool, keys, archive, options, title_key)
+        with patch.object(imp, 'run_hactool', side_effect=tool):
+            with imp.import_game(self.source, ticket=external, title_keys=titlekeys, **self.args):
+                pass
+        self.assertEqual(calls, [('b' * 32, False)])
+
+    def test_unmatched_and_personalized_tickets_stop_import(self):
+        for data, message in [(ticket(rights='2' * 32), 'No matching common ticket'),
+                              (ticket(kind=1), 'personalized')]:
+            self.source.write_bytes(container([('program.nca', b'nca'), ('game.tik', data)]))
+            with patch.object(imp, 'run_hactool', return_value='Content Type: Program\nRights ID: ' + '1' * 32):
+                with self.assertRaisesRegex(ValueError, message):
+                    with imp.import_game(self.source, **self.args):
+                        self.fail('missing key accepted')
+
+    def test_encrypted_ticket_key_uses_titlekey_option(self):
+        def success(args, **kw):
+            self.assertIn('--titlekey=' + 'a' * 32, args)
+            self.assertFalse(any(str(a).startswith('--contentkey=') for a in args))
+            return type('Result', (), {'returncode': 0})()
+        with patch.object(imp.subprocess, 'run', side_effect=success):
+            imp.run_hactool(self.tool, self.keys, self.source, ['--exefsdir=test'], 'a' * 32, encrypted_title_key=True)
+
+    def test_title_keys_conflicting_duplicates(self):
+        path = self.root / 'title.keys'
+        path.write_text('1' * 32 + ' = ' + 'a' * 32 + '\n' + '1' * 32 + ' = ' + 'b' * 32)
+        with self.assertRaisesRegex(ValueError, 'Conflicting duplicate'):
+            imp.read_title_keys(path)
 
     def test_redundant_malformed_derivation_sources(self):
         original = ('header_key = ' + '0' * 64 + '\nmaster_key_06 = ' + '1' * 32

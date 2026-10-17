@@ -149,7 +149,7 @@ def hactool_failure(output, code, inspection):
     return '%s failed (exit 0x%08X): %s.' % (phase, status, reason)
 
 
-def run_hactool(tool, keys, archive, options, title_key=None):
+def run_hactool(tool, keys, archive, options, title_key=None, encrypted_title_key=False):
     args = [str(tool), '--disablekeywarns', '--suppresskeys', '-k', str(keys), '-t', 'nca']
     inspection = options == ['-i']
     env = dict(os.environ)
@@ -157,7 +157,7 @@ def run_hactool(tool, keys, archive, options, title_key=None):
     if inspection:
         env['SWR_HACTOOL_HEADER_ONLY'] = '1'
     if title_key:
-        args.append('--contentkey=' + title_key)
+        args.append(('--titlekey=' if encrypted_title_key else '--contentkey=') + title_key)
     args.extend(options)
     args.append(str(archive))
     # Never echo tool output or its command: both can contain cryptographic keys.
@@ -189,12 +189,44 @@ def read_title_keys(path):
         match = re.fullmatch(r'([0-9a-fA-F]{32})\s*=\s*([0-9a-fA-F]{32})', line)
         if not match:
             raise ValueError('Invalid title.keys entry; expected rights_id = decrypted_title_key.')
-        result[match[1].lower()] = match[2]
+        identity, value = match[1].lower(), match[2].lower()
+        if identity in result and result[identity] != value:
+            raise ValueError('Conflicting duplicate rights IDs in title.keys.')
+        result[identity] = value
     return result
 
 
+def read_ticket(data):
+    """Read bounded common-ticket fields; no signature/authenticity claim."""
+    if len(data) < 4 or len(data) > 0x10000:
+        raise ValueError('Invalid ticket size.')
+    signature = int.from_bytes(data[:4], 'big')
+    offsets = {0x10000: 0x240, 0x10001: 0x140, 0x10002: 0x80,
+               0x10003: 0x240, 0x10004: 0x140, 0x10005: 0x80, 0x10006: 0x40}
+    base = offsets.get(signature)
+    if base is None or len(data) < base + 0x2c0:
+        raise ValueError('Unsupported or truncated ticket signature/data layout.')
+    if data[base + 0x140] != 2:
+        raise ValueError('Unsupported ticket version.')
+    kind = data[base + 0x141]
+    if kind not in (0, 1):
+        raise ValueError('Unsupported ticket title-key type.')
+    rights = data[base + 0x160:base + 0x170].hex()
+    if not int(rights, 16):
+        raise ValueError('Ticket contains an empty rights ID.')
+    # Personalized RSA-wrapped keys cannot be used as common AES keys.
+    return rights, data[base + 0x40:base + 0x50].hex() if kind == 0 else None
+
+
+def add_ticket(tickets, data):
+    rights, key = read_ticket(data)
+    if rights in tickets and tickets[rights] != key:
+        raise ValueError('Conflicting tickets for the same rights ID.')
+    tickets[rights] = key
+
+
 @contextmanager
-def import_game(source, *, hactool=None, keys=None, title_keys=None, program_nca=None, say=print):
+def import_game(source, *, hactool=None, keys=None, title_keys=None, ticket=None, program_nca=None, say=print):
     source = Path(source).expanduser().resolve()
     extension = source.suffix.lower()
     if source.is_dir() or extension == '.nro':
@@ -211,6 +243,13 @@ def import_game(source, *, hactool=None, keys=None, title_keys=None, program_nca
     if not tool or not Path(tool).is_file() or not keys.is_file():
         raise ValueError('Package import requires hactool and your prod.keys. Release builds include hactool; select prod.keys in the app.')
     title_keys = read_title_keys(title_keys or os.environ.get('SWR_TITLE_KEYS'))
+    say('Loaded %d title.keys entries; matching is checked against the selected Program NCA.' % len(title_keys))
+    tickets = {}
+    if ticket:
+        path = Path(ticket).expanduser()
+        if not path.is_file() or path.stat().st_size > 0x10000:
+            raise ValueError('Selected ticket is missing or too large.')
+        add_ticket(tickets, path.read_bytes())
     say('Importing package (original file is read-only)...')
     with tempfile.TemporaryDirectory(prefix='switchrecomp-import-') as temp:
         temp = Path(temp)
@@ -220,8 +259,14 @@ def import_game(source, *, hactool=None, keys=None, title_keys=None, program_nca
             archives = [source]
         else:
             with source.open('rb') as stream:
-                entries = [e for e in package_entries(stream, extension, source.stat().st_size)
-                           if e[0].lower().endswith('.nca')]
+                all_entries = package_entries(stream, extension, source.stat().st_size)
+                for name, offset, size in all_entries:
+                    if name.lower().endswith('.tik'):
+                        if size > 0x10000:
+                            raise ValueError('Embedded ticket is too large.')
+                        add_ticket(tickets, read_at(stream, offset, size))
+                say('Found %d ticket rights IDs in selected package/ticket.' % len(tickets))
+                entries = [e for e in all_entries if e[0].lower().endswith('.nca')]
                 if not entries:
                     raise ValueError('No NCA archives found in the package.')
                 needed = sum(e[2] for e in entries) + 2 * max(e[2] for e in entries)
@@ -248,21 +293,33 @@ def import_game(source, *, hactool=None, keys=None, title_keys=None, program_nca
             if not re.search(r'Content Type:\s*Program\b', info, re.IGNORECASE):
                 continue
             rights = re.search(r'Rights ID:\s*([0-9a-fA-F]{32})', info)
-            title_key = None
+            if not rights:
+                raise ValueError('Extractor did not return a readable Program NCA rights ID; use the bundled hactool.')
+            title_key, encrypted = None, False
             if rights and int(rights[1], 16):
                 title_key = title_keys.get(rights[1].lower())
                 if title_key is None:
-                    raise ValueError('This game requires its decrypted title key. Supply your own title.keys using the app or --title-keys.')
-            candidates.append((archive, title_key))
+                    identity = rights[1].lower()
+                    title_key = tickets.get(identity)
+                    if title_key is None:
+                        detail = ('The matching ticket is personalized; export its decrypted title key from your console.'
+                                  if identity in tickets else 'No matching common ticket was found in the package or selected .tik.')
+                        raise ValueError('Program NCA requires its decrypted title key, but none of the %d loaded title.keys entries matches its rights ID. %s Select the title.keys for this game or its own common .tik; renaming another entry does not supply the missing key.' % (len(title_keys), detail))
+                    encrypted = True
+                    say('Matching common ticket found; using its encrypted title key with prod.keys.')
+                else:
+                    say('Matching decrypted title key found in selected title.keys.')
+            candidates.append((archive, title_key, encrypted))
         if not candidates:
             raise ValueError('No readable Program NCA found. Check keys/extractor support and --program-nca. Updates/DLC need an extracted, merged base game.')
         if len(candidates) != 1:
             raise ValueError('Expected one Program NCA, found %d. For multi-title packages select --program-nca NAME. Updates/DLC require an extracted, merged base game.' % len(candidates))
-        archive, title_key = candidates[0]
+        archive, title_key, encrypted = candidates[0]
         game = temp / 'extracted'
         game.mkdir()
         run_hactool(tool, keys, archive, ['--exefsdir=' + str(game / 'exefs'),
-                                        '--romfsdir=' + str(game / 'romfs')], title_key)
+                                        '--romfsdir=' + str(game / 'romfs')], title_key,
+                    **({'encrypted_title_key': True} if encrypted else {}))
         main = game / 'exefs' / 'main'
         if not main.is_file() or read_at_file(main) != b'NSO0':
             raise ValueError('No decrypted NSO main found. Check keys; update-only/DLC packages are not standalone games.')
