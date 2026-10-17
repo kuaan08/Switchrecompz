@@ -47,7 +47,7 @@ User testing has shown an NSP progressing through import and ARM64-to-C translat
 | Windows DirectX 11 | Experimental ANGLE GLES 3.0 subset; hardware and WARP options |
 | Android arm64 | SDK/NDK APK export from the desktop app; physical-device validation pending |
 
-Vulkan and DirectX reuse the GLES renderer through ANGLE. DirectX 11 does not support compute/storage shaders or multiple render targets in this compatibility profile. Android exports a game-specific APK from the PC; SDK/NDK/JDK must be installed. See [PLATFORM_SUPPORT.md](PLATFORM_SUPPORT.md) for the tested boundary and [ANDROID.md](ANDROID.md) for setup.
+Vulkan and DirectX reuse the GLES renderer through ANGLE. DirectX 11 does not support compute/storage shaders or multiple render targets in this compatibility profile. Android exports a game-specific APK from the PC; SDK/NDK/JDK can be selected from existing installations or downloaded on demand after opting in. See [PLATFORM_SUPPORT.md](PLATFORM_SUPPORT.md) for the tested boundary and [ANDROID.md](ANDROID.md) for setup.
 
 ## How it works
 
@@ -106,7 +106,7 @@ The interface groups the workflow into input, keys and output/build settings. Lo
 
 - **Input and keys:** choose the input, `prod.keys`, `title.keys` and an optional external common ticket. The bundled extractor is detected automatically; an override is available for development.
 - **Verification:** use **Verify game and keys** before a long build. It runs the import and loader checks without starting compilation.
-- **Output target:** choose Windows or Android APK. Windows offers OpenGL, experimental Vulkan and limited DirectX 11/WARP choices. Android uses NDK Clang and exposes SDK/NDK folder selectors.
+- **Output target:** choose Windows or Android APK. Windows offers OpenGL, experimental Vulkan and limited DirectX 11/WARP choices. Android uses NDK Clang and exposes SDK/NDK folder selectors or an optional verified automatic tool download.
 - **Compiler options:** choose TCC for quick iteration or GCC for optimized output. GCC exposes optimization level and an optional host-CPU optimization choice. A build optimized for one CPU may not run on another.
 - **Library:** launch completed builds, open their settings or logs, and delete their build cache when space is needed.
 - **Updates:** **Check for updates** compares the installed development build with this fork's published development release and opens GitHub. Updating remains a manual step.
@@ -138,7 +138,7 @@ CI native caches are keyed by the relevant source and build inputs. The workflow
 
 Release notes and SHA-256 checksums are on the [Releases page](https://github.com/kuaan08/Switchrecompz/releases). The development package is replaced only after the Windows build succeeds.
 
-The single-file package includes the app, recompiler, runtimes, Python, hactool, TCC, GCC and ANGLE graphics libraries. Android SDK/NDK/JDK remain external build requirements. First launch unpacks the embedded payload under `%LOCALAPPDATA%\SwitchRecomp`.
+The single-file package includes the app, recompiler, runtimes, Python, hactool, TCC, GCC and ANGLE graphics libraries. Android SDK/NDK/JDK are not embedded; the optional Android tool setup downloads them to a persistent private cache. First launch unpacks the embedded payload under `%LOCALAPPDATA%\SwitchRecomp`.
 
 ## Getting started
 
