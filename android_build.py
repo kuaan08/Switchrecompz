@@ -47,10 +47,23 @@ def latest(root):
     return max(dirs, key=lambda p: tuple(int(n) for n in re.findall(r'\d+', p.name)), default=None)
 
 
-def toolchains(sdk_arg=None, ndk_arg=None):
+def toolchains(sdk_arg=None, ndk_arg=None, auto=False):
     sdk = sdk_arg or os.environ.get('ANDROID_SDK_ROOT') or os.environ.get('ANDROID_HOME')
     if not sdk and os.name == 'nt':
         sdk = str(Path(os.environ.get('LOCALAPPDATA', '')) / 'Android/Sdk')
+    if auto and os.name == 'nt' and not sdk_arg and not ndk_arg:
+        # Prefer an existing complete SDK. Otherwise use the stable managed
+        # toolchain cache, never the transient per-version exe payload folder.
+        available = Path(sdk) if sdk else Path('__missing_sdk__')
+        installed_ndk = os.environ.get('ANDROID_NDK_HOME') or latest(available / 'ndk')
+        has_build_tools = latest(available / 'build-tools')
+        has_platform = latest(available / 'platforms')
+        if not (installed_ndk and (Path(installed_ndk) / 'toolchains/llvm/prebuilt/windows-x86_64/bin/clang.exe').is_file()
+                and has_build_tools and (has_build_tools / 'aapt2.exe').is_file()
+                and has_platform and (has_platform / 'android.jar').is_file()):
+            import android_tools
+            sdk = str(android_tools.ensure_sdk())
+            ndk_arg = str(android_tools.SDK / 'ndk/27.2.12479018')
     if not sdk:
         raise ValueError('Choose an Android SDK folder or set ANDROID_HOME.')
     sdk = Path(sdk).resolve()
@@ -68,9 +81,20 @@ def toolchains(sdk_arg=None, ndk_arg=None):
     tools = {n: bt / (n + suffix) for n in ('aapt2', 'zipalign')}
     tools['apksigner'] = bt / 'lib/apksigner.jar'
     java = shutil.which('java')
-    if not java:
-        raise ValueError('Install a JDK and put java/keytool on PATH to sign Android APKs.')
-    tools['java'] = Path(java)
+    keytool = shutil.which('keytool')
+    java_home = os.environ.get('JAVA_HOME')
+    if java_home:
+        if not java and (Path(java_home) / 'bin/java.exe').is_file():
+            java = str(Path(java_home) / 'bin/java.exe')
+        if not keytool and (Path(java_home) / 'bin/keytool.exe').is_file():
+            keytool = str(Path(java_home) / 'bin/keytool.exe')
+    if auto and os.name == 'nt' and (not java or not keytool):
+        import android_tools
+        jdk = android_tools.ensure_jdk()
+        java, keytool = str(jdk / 'bin/java.exe'), str(jdk / 'bin/keytool.exe')
+    if not java or not keytool:
+        raise ValueError('A JDK (java.exe and keytool.exe) is required. Choose auto-download in the Android build settings or install JDK 17.')
+    tools['java'], tools['keytool'] = Path(java), Path(keytool)
     if not all(p.is_file() for p in tools.values()):
         raise ValueError('The selected Android SDK build-tools are incomplete.')
     return cc, cxx, llvm / 'sysroot', platform_dir / 'android.jar', tools
@@ -204,10 +228,7 @@ def package_apk(base, module, rt, jar, tools, package, label, keystore=None):
         if keystore:
             raise ValueError('The selected keystore does not exist.')
         key.parent.mkdir(parents=True, exist_ok=True)
-        kt = shutil.which('keytool')
-        if not kt:
-            raise ValueError('Install a JDK with keytool to sign the debug APK.')
-        run([kt, '-genkeypair', '-noprompt', '-keystore', key, '-storepass', 'android',
+        run([tools['keytool'], '-genkeypair', '-noprompt', '-keystore', key, '-storepass', 'android',
              '-keypass', 'android', '-alias', 'androiddebugkey', '-keyalg', 'RSA', '-keysize', '2048',
              '-validity', '10000', '-dname', 'CN=Android Debug,O=Android,C=US'])
     output = base.with_suffix('.apk')
@@ -224,6 +245,8 @@ def main():
     parser.add_argument('--outdir', default='games')
     parser.add_argument('--sdk')
     parser.add_argument('--ndk')
+    parser.add_argument('--auto-tools', action='store_true',
+                        help='Download verified Android SDK/NDK/JDK in a stable user cache when missing (Windows only)')
     parser.add_argument('--package')
     parser.add_argument('--jobs', type=int, default=4)
     parser.add_argument('-O', choices=['0', '1', '2', '3'], default='2')
@@ -232,7 +255,7 @@ def main():
     args = parser.parse_args()
     if args.jobs < 1 or args.jobs > 256:
         parser.error('--jobs must be between 1 and 256')
-    cc, cxx, sysroot, jar, tools = toolchains(args.sdk, args.ndk)
+    cc, cxx, sysroot, jar, tools = toolchains(args.sdk, args.ndk, args.auto_tools)
     title = ''.join(ch for ch in args.o if ch.isalnum() or ch in '-_ ').strip() or 'Game'
     base = Path(args.outdir).resolve() / title
     # Keep the existing import/loader/code generation path as the source of truth.
