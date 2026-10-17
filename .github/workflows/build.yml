@@ -225,12 +225,20 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/swr-android-sdk
+          key: android-sdk-r27c-35-${{ hashFiles('ci/setup_android.py') }}
       - name: Install SDK components
-        run: sdkmanager 'ndk;27.2.12479018' 'platforms;android-35' 'build-tools;35.0.0'
+        run: python3 ci/setup_android.py --out "$RUNNER_TEMP/swr-android-sdk"
       - name: Build a synthetic arm64 APK
         run: |
           python3 ci/make_test_nro.py "$RUNNER_TEMP/android-test.nro"
-          python3 android_build.py "$RUNNER_TEMP/android-test.nro" -o AndroidSmoke --outdir "$RUNNER_TEMP/android-out" --sdk "$ANDROID_HOME" --ndk "$ANDROID_HOME/ndk/27.2.12479018" --jobs 4
+          python3 android_build.py "$RUNNER_TEMP/android-test.nro" -o AndroidSmoke --outdir "$RUNNER_TEMP/android-out" --sdk "$ANDROID_HOME" --ndk "$ANDROID_NDK_HOME" --jobs 4
           python3 ci/verify_android.py "$RUNNER_TEMP/android-out/AndroidSmoke.apk"
       - uses: actions/upload-artifact@v7
         with:

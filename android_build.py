@@ -138,6 +138,11 @@ def asset_files(data):
                 if len(name.encode('utf-8')) > 900 or any(ch in name for ch in '\r\n\\'):
                     raise ValueError('Asset name cannot be represented in the Android manifest.')
                 result.append((name, p))
+    raw=data/'romfs.bin'
+    if raw.is_symlink():
+        raise ValueError('APK export does not accept asset symlinks.')
+    if raw.is_file():
+        result.append(('romfs.bin',raw))
     return result
 
 

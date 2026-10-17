@@ -196,7 +196,7 @@ bindings; compute/storage resources and multiple render targets are unsupported.
 Vulkan requests GLES 3.2. Shader warm-up packs now distinguish desktop and GLES
 profiles. GLES buffer readback maps actual data instead of returning zeros.
 
-Pinned ANGLE binaries come from official Chromium snapshot 1721443. Archive and
+Pinned ANGLE binaries come from official Chromium snapshot 1400034. Archive and
 component SHA-256 checks are required; libraries and third-party license notices
 are staged into the Windows release. The standalone graphics probe uses synthetic
 instructions/assets only, and checks texture/UBO rendering plus pixel/buffer

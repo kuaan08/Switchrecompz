@@ -213,7 +213,7 @@ static int unpack_game_assets(void){
   if(got!=len){ free(names); free(build); return 0; } names[len]=0;
   int ok=1; char* state=NULL;
   for(char* name=strtok_r(names,"\n",&state);name;name=strtok_r(NULL,"\n",&state)){
-    if((strncmp(name,"exefs/",6) && strncmp(name,"romfs/",6)) || strstr(name,"../") ||
+    if((strncmp(name,"exefs/",6) && strncmp(name,"romfs/",6) && strcmp(name,"romfs.bin")) || strstr(name,"../") ||
        strchr(name,'\\') || strchr(name,'\r') || strlen(name)>900){ ok=0; break; }
     char ap[1024], dp[1400], tmp[1420], parent[1400];
     snprintf(ap,sizeof ap,"game/%s",name); snprintf(dp,sizeof dp,"%s/%s_data/%s",g_ext,g_name,name);

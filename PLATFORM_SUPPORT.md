@@ -36,9 +36,9 @@ and driver identity. Incompatible packs are not reused across profiles.
 ## Dependency provenance and tests
 
 `ci/fetch_angle.py` stages graphics libraries from official Chromium snapshot
-**1721443**, checking both archive and individual SHA-256 digests. ANGLE revision:
-`7865acacbf6380ce2acc54f5afd86a242cd239eb`; SwiftShader revision:
-`cddb5c91b23ff70a1f607ea31610aa0d7f4b5ad5`. No browser is bundled or launched.
+**1400034**, checking both archive and individual SHA-256 digests. ANGLE revision:
+`711b2c32641521c9e60a903b85c7367755c6448a`; SwiftShader revision:
+`118f577b4188528566a1f23d88c4f0041372b83a`. No browser is bundled or launched.
 `tools/angle/PROVENANCE.json` and license files accompany the libraries.
 WARP is supplied by Windows.
 

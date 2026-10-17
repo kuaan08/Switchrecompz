@@ -51,7 +51,8 @@ int main(int argc,char** argv){
   glActiveTexture(GL_TEXTURE0+16); glGenTextures(1,&tex); glBindTexture(GL_TEXTURE_2D,tex);
   glTexStorage2D(GL_TEXTURE_2D,1,GL_RGBA8,1,1); glTexSubImage2D(GL_TEXTURE_2D,0,0,0,1,1,GL_RGBA,GL_UNSIGNED_BYTE,white);
   glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST); glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
-  glUseProgram(program); glViewport(0,0,32,32); glColorMaski(0,1,1,1,1);
+  glUseProgram(program); glViewport(0,0,32,32);
+  if(legacy) glColorMaski(0,1,1,1,1); else glColorMask(1,1,1,1);
   glClearColor(0,0,0,1); glClear(GL_COLOR_BUFFER_BIT); glDrawArrays(GL_TRIANGLES,0,3);
   glFinish(); unsigned char pixel[4]={0}; glReadPixels(16,16,1,1,GL_RGBA,GL_UNSIGNED_BYTE,pixel);
   GLenum error=glGetError();
