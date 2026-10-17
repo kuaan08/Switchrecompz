@@ -23,7 +23,7 @@ int main(int argc,char** argv){
   GLint max_ubo=24; glGetIntegerv(GL_MAX_UNIFORM_BUFFER_BINDINGS,&max_ubo);
   g_shader_ubo_stride=legacy? (max_ubo-1)/2 : 18;
   if(g_shader_ubo_stride>18) g_shader_ubo_stride=18;
-  g_glsl_es=1; g_glsl_es_version=300; /* legal on both GLES 3.0 and 3.1+ */
+  g_glsl_es=1; g_glsl_es_version=legacy? 300 : 310;
   u64 code[14]={0};
   code[11]=0xEFD87F800807FF00ull | (3ull<<47);
   code[12]=0xEFF07F800707FF00ull | (2ull<<47);

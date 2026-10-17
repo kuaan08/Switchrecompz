@@ -1154,7 +1154,7 @@ char* shader_to_glsl(const u8* code, u32 max_bytes, int stage, ShaderInfo* si){
   if(g_glsl_es){ sb_f(D,"#version %d es\nprecision highp float;\nprecision highp int;\n",g_glsl_es_version);
     static const char* ps[]={"sampler2D","sampler3D","samplerCube","sampler2DArray","samplerCubeArray","sampler2DShadow","sampler2DArrayShadow","samplerCubeShadow","samplerCubeArrayShadow",
       "isampler2D","usampler2D","isampler3D","usampler3D","isampler2DArray","usampler2DArray"};
-    for(unsigned k=0;k<sizeof ps/sizeof ps[0];k++) if(!legacy || !strstr(ps[k],"CubeArray")) sb_f(D,"precision highp %s;\n",ps[k]); }
+    for(unsigned k=0;k<sizeof ps/sizeof ps[0];k++) if(g_glsl_es_version>=320 || !strstr(ps[k],"CubeArray")) sb_f(D,"precision highp %s;\n",ps[k]); }
   else sb_f(D,"#version %d core\n",g_glsl_version);
   /* gl_Layer from the VS needs an extension on desktop GL; without one we render to layer 0 */
   if(stage!=ST_FS && si->writes_layer){
