@@ -33,6 +33,34 @@ Windows SDK folder). An explicitly selected invalid folder is an error rather
 than being silently replaced. Automatic downloads currently support Windows
 x64 only; the existing Linux CI path installs tools separately.
 
+## Android launcher and diagnostics
+
+New APK exports open a small launcher before the native game. It provides a
+**Start game** button, touch controls and opacity, VSync, verbose logs, optional
+diagnostic dumps / CPU profiling, a recent-log viewer and a **Save log to a file**
+action using the Android document picker (no broad-storage permission). The
+settings are stored in the game's private INI; unrelated advanced values remain.
+
+The NativeActivity begins only after Start game. An independent native input
+thread processes input even while code/data and the graphics renderer initialize,
+fixing one possible source of Android ANRs. This is not evidence that every
+black screen or game hang has been fixed. The app-private log is named game.log.
+Verbose logs and profiling may reduce performance on slower phones.
+
+**Graphics:** Android currently uses OpenGL ES 3.2, not Vulkan. Windows ANGLE
+DLLs cannot be used as Android Vulkan libraries. Vulkan will require a real
+Android backend or a separately packaged and tested Android graphics layer.
+
+The generated APK contains ARM64 code recompiled specifically for one title;
+choosing another NSP/XCI would not turn the APK into a general Switch emulator.
+Building a different game still requires recompilation on the PC or a new
+on-device recompilation architecture. No arbitrary-ROM picker is offered.
+
+To debug ANRs and crashes beyond the in-app file, run:
+
+    adb logcat -d -v threadtime -s SwitchRecomp AndroidRuntime ActivityManager InputDispatcher
+
+Do not share private keys or sensitive identifiers with diagnostic logs.
 ## Export
 
 Select input and keys normally, verify, choose Android APK, then recompile.
