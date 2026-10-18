@@ -89,7 +89,10 @@ static int gles_fallback(const char* n, void** p, void* (*gp)(const char*)){
   if(g_legacy) o_deibv=NULL;
   /* Storage-block binding is GLES 3.1 core. Its absence must be reported
      instead of silently turning compute bindings into a no-op. */
-  if(!strcmp(n,"glShaderStorageBlockBinding")) return 0;
+  if(!strcmp(n,"glShaderStorageBlockBinding")){
+    if(g_legacy){ *p=(void*)f_nop_uuu; return 1; }  /* GLES 3.0 cannot dispatch compute */
+    return 0;  /* GLES 3.1+: never silently ignore an SSBO binding */
+  }
   if(!strcmp(n,"glViewportIndexedf")) *p=(void*)f_vpi; else if(!strcmp(n,"glScissorIndexed")) *p=(void*)f_sci;
   else if(!strcmp(n,"glDepthRangeIndexed")) *p=(void*)f_dri; else if(!strcmp(n,"glClearDepth")) *p=(void*)f_cd;
   else if(!strcmp(n,"glPolygonMode")) *p=(void*)f_nop_ee; else if(!strcmp(n,"glPointSize")) *p=(void*)f_nop_f;
