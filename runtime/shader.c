@@ -1147,8 +1147,16 @@ char* shader_to_glsl(const u8* code, u32 max_bytes, int stage, ShaderInfo* si){
   /* declarations */
   Sb* D=&c->decl;
   int legacy=g_glsl_es && g_glsl_es_version==300;
-  if(legacy && (stage==ST_CS || si->ngbuf || si->nimg || c->uses_shared || (si->cbuf_mask>>g_shader_ubo_stride))){
-    si->unsupported++; snprintf(si->first_unsupported,sizeof si->first_unsupported,"GLES 3.0 mode: requires compute/storage or more UBO slots");
+  if(g_glsl_es && g_shader_ubo_stride<18 && (si->cbuf_mask>>g_shader_ubo_stride)){
+    si->unsupported++;
+    snprintf(si->first_unsupported,sizeof si->first_unsupported,
+             "GLES %d requires more than %d constant-buffer bindings per stage",
+             g_glsl_es_version,g_shader_ubo_stride);
+    free(c->out.p); free(c->pop_tgt); free(c); return NULL;
+  }
+  if(legacy && (stage==ST_CS || si->ngbuf || si->nimg || c->uses_shared)){
+    si->unsupported++; snprintf(si->first_unsupported,sizeof si->first_unsupported,
+             "GLES 3.0 cannot execute compute/storage shaders");
     free(c->out.p); free(c->pop_tgt); free(c); return NULL;
   }
   if(g_glsl_es){ sb_f(D,"#version %d es\nprecision highp float;\nprecision highp int;\n",g_glsl_es_version);
