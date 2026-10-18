@@ -2279,7 +2279,17 @@ static void gpu_thread(void* arg){ t_gpu_thread=1;
   (void)arg;
   { extern void plat_thread_high_priority(void); plat_thread_high_priority(); }
   { int qs=glq_start();   /* 1: GL lives on its own thread (context + fn pointers made there), 0: this thread */
-    if(qs<0 || (qs==0 && (!backend_gl_create() || !swr_gl_load(backend_gl_proc)))){ WARN("No OpenGL 4.3: running without a graphics card\n"); g_gl=0; g_gl_ready=1; return; } }
+    if(qs<0 || (qs==0 && (!backend_gl_create() || !swr_gl_load(backend_gl_proc)))){
+#if defined(_WIN32)
+      extern const char* backend_renderer_name(void);
+      fatal("Renderer %s could not load the graphics functions required by SwitchRecomp. "
+            "Update the graphics driver or choose another renderer. See the graphics probe and game log.",
+            backend_renderer_name());
+#else
+      WARN("Graphics initialization failed: required GLES/OpenGL functions unavailable\n");
+      g_gl=0; g_gl_ready=1; return;
+#endif
+    } }
   { extern int g_glsl_version, g_glsl_es; GLint mj=4, mn=3; glGetIntegerv(GL_MAJOR_VERSION,&mj); glGetIntegerv(GL_MINOR_VERSION,&mn); g_glsl_version= (mj>4||(mj==4&&mn>=4))? 440 : 430;
     const char* vs=(const char*)glGetString(GL_VERSION); if(vs && strstr(vs,"OpenGL ES")){ g_gles=1; g_glsl_es=1; }
     if(g_gles){
