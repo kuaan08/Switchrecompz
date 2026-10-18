@@ -78,9 +78,29 @@ int swr_angle_create(HWND window, const char* renderer, int vsync){
   EI ca[]={0x3040,vk? 0x40 : 4,0x3033,window? 5 : 1,0x3024,8,0x3023,8,0x3022,8,0x3021,8,0x3025,24,0x3026,8,0x3038};
   EF config=NULL; EI count=0;
   if(!eglChooseConfig(display,ca,&config,1,&count) || !count) return fail("No compatible EGL framebuffer configuration");
-  EI at[]={0x3098,3,0x30FB,vk? (!strcmp(renderer,"vulkan-software")? 1 : 2) : 0,0x3038};
-  context=eglCreateContext(display,config,NULL,at);
-  if(!context) return fail(vk? "Vulkan backend requires GLES 3.2" : "DirectX backend requires GLES 3.0");
+  /* The GLES version depends on the ANGLE backend and the actual GPU.
+     Do not request a hard-coded ES 3.2 context on devices exposing only 3.1.
+     ES 3.1 enables shader storage/compute on capable DX11 adapters; when a
+     driver offers only 3.0 the restricted compatibility path still works.
+     GLES capabilities are checked after creation by swr_gl_load/gpu_gl. */
+  EI at[]={0x3098,3,0x30FB,2,0x3038};
+  int selected_minor=-1;
+  int min_minor=vk? 1 : 0;
+  EI last_error=0;
+  for(int minor=2;minor>=min_minor;minor--){
+    at[3]=minor;
+    context=eglCreateContext(display,config,NULL,at);
+    if(context){ selected_minor=minor; break; }
+    last_error=get_error? get_error() : 0;
+  }
+  if(!context){
+    snprintf(error_text,sizeof error_text,
+      "%s could not create a usable GLES 3.%d+ context (last EGL 0x%x). "
+      "Update the GPU driver or select a compatible renderer.",
+      vk? "Vulkan" : "DirectX 11",min_minor,last_error);
+    return 0;
+  }
+  fprintf(stderr,"ANGLE %s: selected GLES 3.%d context\n",renderer,selected_minor);
   EI pa[]={0x3057,32,0x3056,32,0x3038};
   pbuffer=eglCreatePbufferSurface(display,config,pa);
   surface=window? eglCreateWindowSurface(display,config,window,NULL) : pbuffer;
@@ -88,6 +108,8 @@ int swr_angle_create(HWND window, const char* renderer, int vsync){
     context=NULL; return fail("Cannot make the EGL context current");
   }
   eglSwapInterval(display,vsync? 1 : 0);
+  /* Reuse the exact version that succeeded for the shared shader context. */
+  at[3]=selected_minor;
   worker=eglCreateContext(display,config,context,at);
   if(!pbuffer) worker=NULL;
   return 1;
