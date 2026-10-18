@@ -9,6 +9,20 @@ import android_build
 
 
 class AndroidExportTests(unittest.TestCase):
+    def test_native_input_events_are_drained_before_repoll(self):
+        # AInputQueue is a level-triggered looper source. If pollOnce() is
+        # repeated before getEvent(), the fd stays ready forever and a thread
+        # holding g_mx can block the GPU's swap as well as input dispatch.
+        source = (Path(android_build.__file__).resolve().parent /
+                  'runtime/backend_android.c').read_text(encoding='utf-8')
+        input_loop = source.split('static void* input_thread', 1)[1].split(
+            'void video_poll', 1)[0]
+        self.assertNotIn('while(ALooper_pollOnce(', input_loop)
+        self.assertIn('ALooper_pollOnce(0,', input_loop)
+        self.assertIn('AInputQueue_getEvent(', input_loop)
+        self.assertLess(input_loop.index('ALooper_pollOnce(0,'),
+                        input_loop.index('AInputQueue_getEvent('))
+
     def test_exporter_runs_with_isolated_python(self):
         # Windows' embedded Python uses a ._pth file: script siblings are not
         # necessarily imported unless the exporter adds its own directory.
