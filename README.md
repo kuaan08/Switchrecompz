@@ -47,7 +47,7 @@ User testing has shown an NSP progressing through import and ARM64-to-C translat
 | Windows DirectX 11 | Experimental ANGLE GLES 3.0 subset; hardware and WARP options |
 | Android arm64 | SDK/NDK APK export from the desktop app; physical-device validation pending |
 
-Vulkan and DirectX reuse the GLES renderer through ANGLE. DirectX 11 does not support compute/storage shaders or multiple render targets in this compatibility profile. Android exports a game-specific APK from the PC; SDK/NDK/JDK can be selected from existing installations or downloaded on demand after opting in. See [PLATFORM_SUPPORT.md](PLATFORM_SUPPORT.md) for the tested boundary and [ANDROID.md](ANDROID.md) for setup.
+Vulkan and DirectX reuse the GLES renderer through ANGLE. DirectX 11 now negotiates GLES 3.2/3.1 when supported (enabling compute/SSBO/MRT paths) and otherwise falls back to the limited GLES 3.0 profile; full game support still requires validation. Android exports a game-specific APK from the PC; SDK/NDK/JDK can be selected from existing installations or downloaded on demand after opting in. See [PLATFORM_SUPPORT.md](PLATFORM_SUPPORT.md) for the tested boundary and [ANDROID.md](ANDROID.md) for setup.
 
 ## How it works
 
