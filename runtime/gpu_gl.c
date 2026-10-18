@@ -1606,7 +1606,7 @@ void r3d_draw_gl(GpuChannel* ch, int indexed, u32 topology, u32 first, u32 count
       if(r[0x840]&1){ plat_mkdir("captures"); char fp[160]; snprintf(fp,sizeof fp,"captures/gs_%02d.bin",ng); u8* b=malloc(0x8000); gmem_read(ga,b,0x8000); FILE* f=fopen(fp,"wb"); if(f){ fwrite(b,1,0x8000,f); fclose(f); } free(b); } }
     trace_note("WARNING: unsupported stages enabled (tess/geometry)\n"); }
   if(vs && !fs){ /* depth-only passes: use an empty FS */
-    static Sh nullfs; static char nsrc[64]; if(!nullfs.gl && !nullfs.failed){ char e[512]; if(g_gles) snprintf(nsrc,sizeof nsrc,"#version 320 es\nvoid main(){}\n"); else snprintf(nsrc,sizeof nsrc,"#version %d core\nvoid main(){}\n",g_glsl_version); nullfs.stage=ST_FS; nullfs.hash=0x4E554C4C46530001ull; nullfs.src=nsrc; nullfs.gl=compile(GL_FRAGMENT_SHADER,nsrc,e,sizeof e); if(!nullfs.gl) nullfs.failed=1; }
+    static Sh nullfs; static char nsrc[64]; if(!nullfs.gl && !nullfs.failed){ char e[512]; if(g_gles) snprintf(nsrc,sizeof nsrc,"#version %d es\nvoid main(){}\n",g_glsl_es_version); else snprintf(nsrc,sizeof nsrc,"#version %d core\nvoid main(){}\n",g_glsl_version); nullfs.stage=ST_FS; nullfs.hash=0x4E554C4C46530001ull; nullfs.src=nsrc; nullfs.gl=compile(GL_FRAGMENT_SHADER,nsrc,e,sizeof e); if(!nullfs.gl) nullfs.failed=1; }
     fs=&nullfs; }
   if(!vs || !fs){ st_noshader++; trace_note("DRAW SKIPPED: no shader\n"); return; }
   if(vs->failed || fs->failed){ st_shfail++; trace_note("DRAW SKIPPED: failed shader vs=%016llx(%d) fs=%016llx(%d)\n",(unsigned long long)vs->hash,vs->failed,(unsigned long long)fs->hash,fs->failed); return; }
@@ -2122,7 +2122,8 @@ static void APIENTRY gl_dbg(GLenum src, GLenum type, GLuint id, GLenum sev, GLsi
 static const char* shader_pack_path(void){
   extern int g_glsl_es_version;
   return !g_gles? "shader_cache/shader_pack_v5_gl.bin" : g_glsl_es_version==300?
-    "shader_cache/shader_pack_v5_es300.bin" : "shader_cache/shader_pack_v5_es320.bin";
+    "shader_cache/shader_pack_v5_es300.bin" : g_glsl_es_version==310?
+    "shader_cache/shader_pack_v5_es310.bin" : "shader_cache/shader_pack_v5_es320.bin";
 }
 #define PACK_PATH shader_pack_path()
 static u64* pk_keys; static u32 pk_n, pk_cap;
@@ -2274,12 +2275,20 @@ static void gpu_thread(void* arg){ t_gpu_thread=1;
   { extern int g_glsl_version, g_glsl_es; GLint mj=4, mn=3; glGetIntegerv(GL_MAJOR_VERSION,&mj); glGetIntegerv(GL_MINOR_VERSION,&mn); g_glsl_version= (mj>4||(mj==4&&mn>=4))? 440 : 430;
     const char* vs=(const char*)glGetString(GL_VERSION); if(vs && strstr(vs,"OpenGL ES")){ g_gles=1; g_glsl_es=1; }
     if(g_gles){
-      g_glsl_es_version=(mj==3 && mn==0)? 300 : 320;
-      if(g_glsl_es_version==300){
-        GLint count=24; glGetIntegerv(GL_MAX_UNIFORM_BUFFER_BINDINGS,&count);
-        g_shader_ubo_stride=(count-1)/2; if(g_shader_ubo_stride>18) g_shader_ubo_stride=18;
-        LOG("DirectX compatibility mode: GLES 3.0, no compute/storage shaders, %d constant-buffer slots per stage\n",g_shader_ubo_stride);
-      }
+      /* GLES 3.1 has GLSL ES 310, not 320. Treating it as 3.2 made
+         fragment/compute shaders fail at compile time on real devices. */
+      g_glsl_es_version= mj*100+mn*10;
+      GLint count=0; glGetIntegerv(GL_MAX_UNIFORM_BUFFER_BINDINGS,&count);
+      /* Reserve the last binding for the render-scale UBO. GLES 3.1 has
+         compute buffers in an additional stage; never assign out-of-range
+         binding numbers when ANGLE exposes fewer than desktop GL. */
+      int stages=g_glsl_es_version==300? 2 : 3;
+      int available=(count-1)/stages;
+      if(available<1) fatal("GLES %d exposes only %d UBO bindings; need at least %d",g_glsl_es_version,count,stages+1);
+      g_shader_ubo_stride=available<18? available : 18;
+      LOG("GPU: GLES %d (%s), %d total UBO bindings, %d slots/stage%s\n",
+          g_glsl_es_version,mj==3 && mn>=1? "compute-capable API" : "graphics-only API",
+          count,g_shader_ubo_stride,g_glsl_es_version==300? " (no compute shaders)" : "");
       GLint n=0; glGetIntegerv(GL_NUM_EXTENSIONS,&n); typedef const GLubyte* (APIENTRY*GSI)(GLenum,GLuint); GSI gsi=(GSI)backend_gl_proc("glGetStringi");
       for(GLint k=0;k<n && gsi;k++){ const char* e=(const char*)gsi(GL_EXTENSIONS,(GLuint)k); if(!e) continue;
         if(!strcmp(e,"GL_KHR_texture_compression_astc_ldr")) g_has_astc=1;
