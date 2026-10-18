@@ -2080,10 +2080,30 @@ static void gpu_evict_step(void){
       if(g_submit_epoch-e->epoch>4800){ *pp=e->next; glDeleteBuffers(1,&e->id); free(e); st_vb_evict++; vany=1; } else pp=&e->next; } }
   if(vany) g_va_inval=1; }
 static int present_addr(u64 cpu_addr, int w, int h){
-  /* find the RT whose gva maps this memory */
-  Tex* best=NULL;
-  for(int k=0;k<TEXH;k++) for(Tex* t=texh[k];t;t=t->next) if(t->is_rt && gmmu_translate(t->gva)==cpu_addr){ if(!best || (t->w==(u32)w && t->h==(u32)h) || t->last_used>best->last_used) best=t; }
-  trace_note("PRESENT %llx %dx%d -> %s %llx\n",(unsigned long long)cpu_addr,w,h,best?"rt":"(none, CPU)",(unsigned long long)(best?best->gva:0));
+  /* The source memory can have several cached render targets (different
+     sizes reused at the same guest address). The original condition promoted
+     ANY newer RT over an exact-size match, producing black/stale frames.
+     Prefer an exact VI size; within each class choose the most recently drawn
+     texture. Never allow a size mismatch to outrank an exact match. */
+  Tex* best=NULL; int exact=0, matches=0;
+  for(int k=0;k<TEXH;k++) for(Tex* t=texh[k];t;t=t->next)
+    if(t->is_rt && gmmu_translate(t->gva)==cpu_addr){
+      int this_exact=t->w==(u32)w && t->h==(u32)h;
+      matches++;
+      if(!best || (this_exact && !exact) ||
+         (this_exact==exact && t->last_used>best->last_used)){
+        best=t; exact=this_exact;
+      }
+    }
+  if(matches>1 && (g_frame<120 || g_verbose>=2)){
+    static unsigned warned;
+    if(warned++<12) LOG("gpu: presentation aliases=%d, chosen rt %llx (%ux%u, exact=%d, used=%u), VI %dx%d\n",
+       matches,(unsigned long long)(best?best->gva:0),best?best->w:0,best?best->h:0,
+       exact,best?best->last_used:0,w,h);
+  }
+  trace_note("PRESENT %llx %dx%d -> %s %llx (exact=%d matches=%d)\n",
+    (unsigned long long)cpu_addr,w,h,best?"rt":"(none, CPU)",
+    (unsigned long long)(best?best->gva:0),exact,matches);
   if(best){ best->last_used=g_frame; g_blit_rt=1; blit_to_screen(best->id,1,(int)best->w,(int)best->h); g_blit_rt=0; g_last_is_rt=1; st_pres_rt++; return 1; }
   st_pres_cpu++;
   static int said; if(said<3){ said++;
@@ -2110,6 +2130,14 @@ static void do_screenshot(const char* path){
   free(px); g_last_shot_hash=hh; }
 /* debug: dump the recently used RTs to screenshots/ with some stats */
 static void dump_rts(void){
+  plat_mkdir("captures");
+  /* Record the exact texture actually selected for presentation, in addition
+     to the pool of intermediate RTs. F5 now distinguishes an all-black source
+     from a presentation/quad error and preserves a reproducible PPM image. */
+  do_screenshot("captures/current_present");
+  LOG("gpu: F5 saved captures/current_present.ppm (selected final texture=%u, %dx%d, RT=%d, hash=%llx)\n",
+      g_last_present_tex,g_last_w,g_last_h,g_last_is_rt,
+      (unsigned long long)g_last_shot_hash);
   Tex* list[16]; int n=0;
   for(int k=0;k<TEXH;k++) for(Tex* t=texh[k];t;t=t->next) if(t->is_rt && !t->f.depth && !t->f.is_int){
     if(n<16){ list[n++]=t; } else { int mi=0; for(int i=1;i<16;i++) if(list[i]->last_used<list[mi]->last_used) mi=i; if(t->last_used>list[mi]->last_used) list[mi]=t; } }
@@ -2130,6 +2158,7 @@ static void dump_rts(void){
     FILE* f=fopen(path,"wb"); if(f){ fprintf(f,"P6\n%u %u\n255\n",ow,oh); for(u32 y=0;y<oh;y++) for(u32 x=0;x<ow;x++){ u8* q=px+(((size_t)(h-1-y*step))*w+x*step)*4; fwrite(q,1,3,f); } fclose(f); }
     free(px); }
   glBindFramebuffer(GL_READ_FRAMEBUFFER,0); glDeleteFramebuffers(1,&fb);
+  state_dirty(); mb_reset();
   LOG("--------------------------------------------\n"); fflush(NULL);
 }
 static void APIENTRY gl_dbg(GLenum src, GLenum type, GLuint id, GLenum sev, GLsizei len, const GLchar* msg, const void* up){
