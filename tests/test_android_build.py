@@ -23,7 +23,12 @@ class AndroidExportTests(unittest.TestCase):
         ns = '{http://schemas.android.com/apk/res/android}'
         self.assertEqual(root.find('application').get(ns + 'label'), 'Game & "test"')
         self.assertFalse(root.findall('uses-permission'))
-        self.assertEqual(root.find('application').get(ns + 'hasCode'), 'false')
+        self.assertEqual(root.find('application').get(ns + 'hasCode'), 'true')
+        activities = root.find('application').findall('activity')
+        self.assertEqual(len(activities), 2)
+        self.assertEqual(activities[0].get(ns + 'name'), 'org.switchrecomp.frontend.LauncherActivity')
+        self.assertEqual(activities[1].get(ns + 'name'), 'android.app.NativeActivity')
+        self.assertEqual(activities[1].get(ns + 'exported'), 'false')
 
     def test_invalid_package_identifiers_are_rejected(self):
         for package in ('x', '../test', 'org.test" android:debuggable="true', 'org.1game'):
