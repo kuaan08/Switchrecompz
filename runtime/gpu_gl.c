@@ -349,7 +349,11 @@ static void lvl_read1(GLuint tex, GLenum target, int level, int layer, GLint x, 
   glReadPixels(x,y,1,1,GL_RGBA,GL_FLOAT,out);
   glFramebufferTexture2D(GL_READ_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,0,0); glBindFramebuffer(GL_FRAMEBUFFER,g_fbo); }
 static void lvl_copy(GLuint src, GLuint dst, GLenum target, int level, int layer, GLsizei w, GLsizei h, int color){
-  if(!g_lvl_mode || !color){ p_cis(src,GL_TEXTURE_2D,0,0,0,0,dst,target,level,0,0,target==GL_TEXTURE_2D? 0 : layer,w,h,1); return; }
+  if(p_cis && (!g_lvl_mode || !color)){ p_cis(src,GL_TEXTURE_2D,0,0,0,0,dst,target,level,0,0,target==GL_TEXTURE_2D? 0 : layer,w,h,1); return; }
+  if(!color){
+    static int reported; if(!reported++){ WARN("GLES: depth mip copy needs glCopyImageSubData (unavailable on this device)\n"); }
+    return;
+  }
   lvl_blit(src,GL_TEXTURE_2D,0,0,w,h,dst,target,level,layer,w,h,GL_NEAREST); }
 /* fill levels from+1..levels-1 from level 'from' */
 static void lvl_gen(GLuint tex, GLenum target, int from, int levels, u32 layers, u32 W0, u32 H0){
@@ -506,8 +510,14 @@ static void gl_selftest(void){
     g_texoff_emul=1; g_lvl_mode=1; g_snorm_fb=1;
     LOG("DirectX compatibility mode: desktop format self-tests disabled\n"); return;
   }
+  /* GLES 3.1 and 3.2 must also prefer FBO blits: some ANGLE implementations
+     lack glCopyImageSubData or cannot copy nonzero mip levels reliably. */
+  if(g_gles){
+    g_texoff_emul=1; g_lvl_mode=1; g_snorm_fb=1;
+    LOG("GLES: using framebuffer blits for render-target mip copies\n");
+    return;
+  }
   /* non-constant texture offsets: NVIDIA takes them, the spec / AMD / Mesa don't */
-  if(g_gles) g_texoff_emul=1;
   else { static const char* fs="#version 430 core\nlayout(binding=0) uniform sampler2D t; uniform int k; out vec4 o; void main(){ o=textureOffset(t,vec2(0.5),ivec2(bitfieldExtract(k,0,4),bitfieldExtract(k,4,4))); }";
     GLuint sh=compile(GL_FRAGMENT_SHADER,fs,NULL,0); g_texoff_emul= sh? 0 : 1; if(sh) glDeleteShader(sh);
     if(getenv("SWR_TEXOFF_EMUL")) g_texoff_emul=1;
