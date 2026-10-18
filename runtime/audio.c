@@ -321,6 +321,9 @@ static void effects_run(AudRen* r, u32 mixid){
     #undef BUF
   } }
 
+/* Diagnostics for audio routing: samples may be decoded yet never reach a
+   sink, or all guest wave buffers may be absent. Only the audio thread writes. */
+static u64 g_voice_signal_periods, g_mix_signal_periods;
 static void ren_render(AudRen* r){
   int n=(int)r->count;
   memset(r->buf,0,sizeof(float)*r->nmixbuf*r->count);
@@ -330,6 +333,9 @@ static void ren_render(AudRen* r){
     int direct=mix_ok(r,v->mix), split= v->split>=0 && (u32)v->split<r->nsplit;
     if(!direct && !split) continue;
     voice_render(r,v);
+    for(int t=0;t<n;t++) if(r->vo[0][t]>0.5f || r->vo[0][t]<-0.5f){
+      g_voice_signal_periods++; break;
+    }
     if(direct){ Mix* m=&r->mix[v->mix];
       for(int c=0;c<v->nch;c++){ if(v->res[c]>=r->nvoice) continue; ChanRes* cr=&r->cr[v->res[c]]; if(!cr->in_use) continue;
         for(int b=0;b<m->nbuf && b<24;b++){ float g0=cr->vol0[b], dg=(cr->vol[b]-g0)/(float)n; if(g0==0.0f && dg==0.0f) continue;
@@ -365,6 +371,10 @@ static void ren_render(AudRen* r){
   if(n==PERIOD) memcpy(r->o48,out,sizeof out);
   else for(int c=0;c<2;c++) for(int t=0;t<PERIOD;t++){ double p=(double)(t+1)*n/PERIOD-1.0; int i=(int)p; float fr=(float)(p-i);
     if(p<0){ i=-1; fr=(float)(p+1.0); } float a= i<0? r->rs_prev[c] : out[c][i], b=out[c][i+1<n? i+1 : n-1]; r->o48[c][t]=a+(b-a)*fr; }
+  for(int t=0;t<n;t++) if(out[0][t]>0.5f || out[0][t]<-0.5f ||
+                           out[1][t]>0.5f || out[1][t]<-0.5f){
+    g_mix_signal_periods++; break;
+  }
   r->rs_prev[0]=out[0][n-1]; r->rs_prev[1]=out[1][n-1];
   r->frames++; }
 
@@ -701,9 +711,33 @@ static void audio_thread(void* arg){ (void)arg;
           pm_unlock(&r->lk);
         }
         pm_unlock(&g_alk);
+        /* Probe guest voice buffers and destination routing without dumping
+           raw audio or private game memory. This distinguishes zero decoded
+           samples from routing/mix mistakes and host output errors. */
+        u32 valid_waves=0,pending_waves=0,unrouted=0,volzero=0,active_mix=0;
+        pm_lock(&g_alk);
+        for(AudRen* r=g_rens;r;r=r->next){
+          pm_lock(&r->lk);
+          for(u32 i=0;i<r->nvoice;i++){ Voice* v=&r->v[i];
+            if(!v->in_use || v->state!=0) continue;
+            for(int k=0;k<4;k++){
+              if(v->wb[k].valid) valid_waves++;
+              if(v->wb[k].pending) pending_waves++;
+            }
+            if(!mix_ok(r,v->mix) && (v->split<0 || (u32)v->split>=r->nsplit)) unrouted++;
+            if(v->vol<0.0001f) volzero++;
+          }
+          for(u32 i=0;i<r->nmix;i++) if(mix_ok(r,i)) active_mix++;
+          pm_unlock(&r->lk);
+        }
+        pm_unlock(&g_alk);
         LOG("audio: 5s mixer meter peak=%u/32767 nonzero_periods=%u/1000; renderers=%u started=%u playing_voices=%u device_sinks=%u host=%s volume=%d\n",
             peak,audible_periods,renderers,running,voices,sinks,host?"open":"none",g_opt_volume);
+        LOG("audio: routing voice_signal_periods=%llu mix_signal_periods=%llu; valid_wave_buffers=%u pending_wave_buffers=%u unrouted_voices=%u muted_voices=%u active_mixes=%u\n",
+            (unsigned long long)g_voice_signal_periods,(unsigned long long)g_mix_signal_periods,
+            valid_waves,pending_waves,unrouted,volzero,active_mix);
         periods=audible_periods=peak=0;
+        g_voice_signal_periods=g_mix_signal_periods=0;
       }
       if(host) host_write(pcm);
       wav_write(pcm); done++; kevent_signal(g_ren_ev);
