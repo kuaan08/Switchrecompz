@@ -43,7 +43,12 @@ static int host_room(void){
   if(((volatile WAVEHDR*)&g_hdr[g_hnext])->dwFlags&WHDR_INQUEUE) return 0;
   return busy<LATENCY? LATENCY-busy : 0; }
 static void host_write(const i16* pcm){
-  memcpy(g_wpcm[g_hnext],pcm,sizeof g_wpcm[0]); waveOutWrite(g_wo,&g_hdr[g_hnext],sizeof(WAVEHDR)); g_hnext=(g_hnext+1)%NHDR; }
+  memcpy(g_wpcm[g_hnext],pcm,sizeof g_wpcm[0]);
+  MMRESULT result=waveOutWrite(g_wo,&g_hdr[g_hnext],sizeof(WAVEHDR));
+  if(result!=MMSYSERR_NOERROR){
+    static int errors; if(errors++<8) WARN("audio: waveOutWrite failed with error %u\n",(unsigned)result);
+  }
+  g_hnext=(g_hnext+1)%NHDR; }
 static void host_wait(void){ WaitForSingleObject(g_wev,5); }
 #elif defined(__linux__) && !defined(__ANDROID__)
 #include <dlfcn.h>
@@ -667,7 +672,42 @@ static void audio_thread(void* arg){ (void)arg;
     if(host) n=host_room();
     else { u64 due=(plat_ns()-t0)/5000000ull; if(due>done+4) done=due-4; n=(int)(due-done); }
     if(n<=0){ if(host) host_wait(); else plat_sleep_ns(1000000); continue; }
-    while(n-->0){ render_period(pcm); if(host) host_write(pcm); wav_write(pcm); done++; kevent_signal(g_ren_ev); } } }
+    while(n-->0){
+      render_period(pcm);
+      /* A live sound device does not mean the HLE mixer has nonzero samples.
+         Record a five-second peak/activity report to distinguish silent game
+         mixes from Windows waveOut failures, without logging every buffer. */
+      static u32 periods, audible_periods, peak;
+      u32 block_peak=0;
+      for(int i=0;i<PERIOD*2;i++){
+        int v=pcm[i]; unsigned a=(unsigned)(v<0? -v : v);
+        if(a>block_peak) block_peak=a;
+      }
+      if(block_peak>peak) peak=block_peak;
+      if(block_peak>0) audible_periods++;
+      if(++periods>=1000){
+        u32 renderers=0, running=0, voices=0, sinks=0;
+        pm_lock(&g_alk);
+        for(AudRen* r=g_rens;r;r=r->next){
+          renderers++;
+          pm_lock(&r->lk);
+          if(r->started){
+            running++;
+            for(u32 i=0;i<r->nvoice;i++)
+              if(r->v[i].in_use && r->v[i].state==0) voices++;
+            for(u32 i=0;i<r->nsink;i++)
+              if(r->sk[i].in_use && r->sk[i].type==1) sinks++;
+          }
+          pm_unlock(&r->lk);
+        }
+        pm_unlock(&g_alk);
+        LOG("audio: 5s mixer meter peak=%u/32767 nonzero_periods=%u/1000; renderers=%u started=%u playing_voices=%u device_sinks=%u host=%s volume=%d\n",
+            peak,audible_periods,renderers,running,voices,sinks,host?"open":"none",g_opt_volume);
+        periods=audible_periods=peak=0;
+      }
+      if(host) host_write(pcm);
+      wav_write(pcm); done++; kevent_signal(g_ren_ev);
+    } } }
 
 void audio_init(void){
   pm_init(&g_alk);
