@@ -889,7 +889,9 @@ impl App {
                 },
             );
             if self.settings.renderer.starts_with("d3d11") {
-                ui.label("ANGLE tries GLES 3.2/3.1 (compute if supported), then GLES 3.0 on older DirectX drivers. Some advanced Maxwell features remain unsupported.");
+                ui.label(
+                    "ANGLE tries GLES 3.2/3.1 (compute if supported), then GLES 3.0 on older DirectX drivers. Some advanced Maxwell features remain unsupported.",
+                );
             }
         }
         ui.label("Name");
