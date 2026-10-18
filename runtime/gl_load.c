@@ -76,7 +76,7 @@ static void APIENTRY f_daibi(GLenum m, GLint f, GLsizei c, GLsizei n, GLuint bi)
 static void APIENTRY f_lop(GLenum a){ (void)a; }
 static int gles_desktop_only(const char* n){
   static const char* l[]={"glViewportIndexedf","glScissorIndexed","glDepthRangeIndexed","glClearDepth","glDrawBuffer","glPolygonMode","glPointSize","glPrimitiveRestartIndex",
-    "glGetTexImage","glGetBufferSubData","glProvokingVertex","glShaderStorageBlockBinding","glLogicOp","glDrawElementsInstancedBaseVertexBaseInstance","glDrawArraysInstancedBaseInstance",NULL};
+    "glGetTexImage","glGetBufferSubData","glProvokingVertex","glLogicOp","glDrawElementsInstancedBaseVertexBaseInstance","glDrawArraysInstancedBaseInstance",NULL};
   for(int i=0;l[i];i++) if(!strcmp(l[i],n)) return 1; return 0; }
 static int gles_fallback(const char* n, void** p, void* (*gp)(const char*)){
   if(!g_is_gles) return 0;
@@ -87,13 +87,15 @@ static int gles_fallback(const char* n, void** p, void* (*gp)(const char*)){
   o_dei=(void (APIENTRY*)(GLenum,GLsizei,GLenum,const void*,GLsizei))gp("glDrawElementsInstanced");
   o_map=(void*)gp("glMapBufferRange"); o_unmap=(void*)gp("glUnmapBuffer");
   if(g_legacy) o_deibv=NULL;
+  /* Storage-block binding is GLES 3.1 core. Its absence must be reported
+     instead of silently turning compute bindings into a no-op. */
+  if(!strcmp(n,"glShaderStorageBlockBinding")) return 0;
   if(!strcmp(n,"glViewportIndexedf")) *p=(void*)f_vpi; else if(!strcmp(n,"glScissorIndexed")) *p=(void*)f_sci;
   else if(!strcmp(n,"glDepthRangeIndexed")) *p=(void*)f_dri; else if(!strcmp(n,"glClearDepth")) *p=(void*)f_cd;
   else if(!strcmp(n,"glPolygonMode")) *p=(void*)f_nop_ee; else if(!strcmp(n,"glPointSize")) *p=(void*)f_nop_f;
   else if(!strcmp(n,"glPrimitiveRestartIndex")) *p=(void*)f_nop_u; else if(!strcmp(n,"glLogicOp")) *p=(void*)f_lop;
   else if(!strcmp(n,"glGetTexImage")) *p=(void*)f_gti; else if(!strcmp(n,"glGetBufferSubData")) *p=(void*)f_gbs;
   else if(!strcmp(n,"glDrawBuffer")) *p=(void*)f_db; else if(!strcmp(n,"glProvokingVertex")) *p=(void*)f_nop_e;
-  else if(!strcmp(n,"glShaderStorageBlockBinding")) *p=(void*)f_nop_uuu;
   else if(!strcmp(n,"glDrawElementsInstancedBaseVertexBaseInstance") && (o_deibv || o_dei)) *p=(void*)f_deibvbi;
   else if(!strcmp(n,"glDrawArraysInstancedBaseInstance") && o_dai) *p=(void*)f_daibi;
   return *p!=NULL; }
@@ -123,10 +125,11 @@ int swr_gl_load(void* (*gp)(const char*)){
 #else
 #define GETP(n) gp(n)
 #endif
-#define X(T,n) p_##n=(T)GETP(#n); if(g_is_gles && gles_desktop_only(#n)) p_##n=NULL; if(!p_##n){ if(!gles_fallback(#n,(void**)&p_##n,gp)) ok=0; }
+#define X(T,n) p_##n=(T)GETP(#n); if(g_is_gles && gles_desktop_only(#n)) p_##n=NULL; if(!p_##n){ if(!gles_fallback(#n,(void**)&p_##n,gp)){ ok=0; fprintf(stderr,"Missing %s entry point (GLES %d)\n",#n,g_glsl_es_version); } }
   { const char* v=(const char*)(p_glGetString=(PFNGLGETSTRINGPROC)GETP("glGetString"))? (const char*)p_glGetString(GL_VERSION) : NULL; g_is_gles= v && strstr(v,"OpenGL ES"); }
   if(g_is_gles){ int major=3,minor=2; sscanf((const char*)p_glGetString(GL_VERSION),"OpenGL ES %d.%d",&major,&minor);
-    g_legacy=major==3 && minor==0; g_glsl_es_version=g_legacy? 300 : 320;
+    g_legacy=major==3 && minor==0;
+    g_glsl_es_version=major*100+minor*10;
   }
   SWR_GL_FUNCS(X)
 #undef X
