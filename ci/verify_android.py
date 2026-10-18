@@ -7,6 +7,9 @@ import zipfile
 
 def verify(path):
     with zipfile.ZipFile(path) as apk:
+        dex = apk.read('classes.dex')
+        if not dex.startswith(b'dex\\n'):
+            raise ValueError('APK is missing the Android launcher classes.dex')
         for name in ('lib/arm64-v8a/libgame_code.so', 'lib/arm64-v8a/libswr_runtime.so'):
             data = apk.read(name)
             if data[:6] != b'\x7fELF\x02\x01' or struct.unpack_from('<H', data, 18)[0] != 183:
