@@ -1147,11 +1147,19 @@ char* shader_to_glsl(const u8* code, u32 max_bytes, int stage, ShaderInfo* si){
   /* declarations */
   Sb* D=&c->decl;
   int legacy=g_glsl_es && g_glsl_es_version==300;
-  if(g_glsl_es && g_shader_ubo_stride<18 && (si->cbuf_mask>>g_shader_ubo_stride)){
+  /* ANGLE GLES 3.1 often exposes fewer UBO bindings than desktop GL.
+     The guest can use CB17 while only having two live CBs. Pack active
+     guest CBs into dense bindings instead of rejecting sparse high indices.
+     Leave the legacy GLES 3.0 profile's bindings unchanged. */
+  int packed_cb=g_glsl_es && g_glsl_es_version>=310 && g_shader_ubo_stride<18;
+  int slots_needed=packed_cb? __builtin_popcount(si->cbuf_mask) :
+                   (g_shader_ubo_stride<18 && (si->cbuf_mask>>g_shader_ubo_stride))?
+                     g_shader_ubo_stride+1 : __builtin_popcount(si->cbuf_mask);
+  if(g_glsl_es && slots_needed>g_shader_ubo_stride){
     si->unsupported++;
     snprintf(si->first_unsupported,sizeof si->first_unsupported,
-             "GLES %d requires more than %d constant-buffer bindings per stage",
-             g_glsl_es_version,g_shader_ubo_stride);
+             "GLES %d needs %d constant-buffer bindings per stage (limit %d)",
+             g_glsl_es_version,slots_needed,g_shader_ubo_stride);
     free(c->out.p); free(c->pop_tgt); free(c); return NULL;
   }
   if(legacy && (stage==ST_CS || si->ngbuf || si->nimg || c->uses_shared)){
@@ -1182,7 +1190,8 @@ char* shader_to_glsl(const u8* code, u32 max_bytes, int stage, ShaderInfo* si){
   if(stage==ST_CS) sb_f(D,"layout(local_size_x=%u, local_size_y=%u, local_size_z=%u) in;\n",si->cs_local[0]? si->cs_local[0] : 1,si->cs_local[1]? si->cs_local[1] : 1,si->cs_local[2]? si->cs_local[2] : 1);
   for(int i=0;i<18;i++) if(si->cbuf_mask&(1u<<i)){
     if(legacy) sb_f(D,"layout(std140) uniform S%d_CB%d { vec4 d[4096]; } cb%d;\n",stage,i,i);
-    else sb_f(D,"layout(std140, binding=%d) uniform S%d_CB%d { vec4 d[4096]; } cb%d;\n",base_bind+i,stage,i,i);
+    else sb_f(D,"layout(std140, binding=%d) uniform S%d_CB%d { vec4 d[4096]; } cb%d;\n",
+              base_bind+(packed_cb? __builtin_popcount(si->cbuf_mask&((1u<<i)-1u)) : i),stage,i,i);
   }
   for(int i=0;i<si->ntex;i++){ ShTex* t=&si->tex[i];
     if(!legacy) sb_f(D,"layout(binding=%d) ",slot*(g_glsl_es? 16 : 32)+i);
