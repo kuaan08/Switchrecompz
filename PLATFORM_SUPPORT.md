@@ -85,3 +85,30 @@ build. ELF alignment alone does not validate 16 KiB host memory-page behavior.
 Earlier architecture references included N64Recomp and RT64. No renderer code
 from those projects was copied; their graphics models are not interchangeable
 with this runtime's Switch GPU command handling.
+
+## CLU CLU LAND black-frame investigation (October 2026)
+
+A user-provided frame trace shows meaningful pixels after the first eleven draws,
+then an almost-black render target after draw 12. The twelfth draw samples a
+32x32 texture, with FS constant buffer 3 multiplier (1,1,1,0) and Maxwell
+per-target blend disabled. The VI presentation chooses the RT at an exact size;
+it is **not** a shader compilation failure or an absent GL context. The correct
+Maxwell semantics still require investigation; enabling blending globally would
+break unrelated games. The launcher therefore offers no fake universal fix.
+
+For an isolated A/B experiment on a recompiled Windows game, open Command Prompt
+in the game directory and launch the generated game from the same console after:
+
+    set SWR_DEBUG_SKIP_TRANSPARENT_QUAD=1
+
+Only a specific unblended, 32x32, alpha-zero fullscreen pattern is skipped, and
+only with that environment variable. The game logs the skipped count. The normal
+path is unchanged when unset. Whether the menu remains visible with this flag
+will distinguish a final overdraw problem from later rendering/presentation.
+F5 saves the chosen final RT and intermediate traces under captures/.
+
+Audio is independent: the same capture shows nine active voices and a live
+waveOut device but absolutely silent PCM. The new five-second audio routing
+log records decoded voice signal, mixed signal, buffer validity and muted or
+unrouted voices, so the next capture can isolate guest data handling from the
+host sound backend. No audio repair is asserted until that data is available.
