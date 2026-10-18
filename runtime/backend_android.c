@@ -155,7 +155,12 @@ static void* input_thread(void* unused){
     /* Never allow an activity callback to free this queue while it is polled. */
     if(g_queue_att){
       int dummy; void* data;
-      while(ALooper_pollOnce(0,NULL,&dummy,&data)>=0){}
+      /* Android input fd readiness is level-triggered. Repeatedly calling
+         pollOnce before consuming queued events returns the same ready fd
+         forever, holding g_mx and blocking the GPU's backend_gl_swap().
+         That freezes the last frame and can lead to an InputDispatcher ANR.
+         Poll once, then drain AInputQueue before polling again. */
+      (void)ALooper_pollOnce(0,NULL,&dummy,&data);
       AInputEvent* ev=NULL;
       while(AInputQueue_getEvent(g_queue_att,&ev)>=0){
         if(AInputQueue_preDispatchEvent(g_queue_att,ev)) continue;
