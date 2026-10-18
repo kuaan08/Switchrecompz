@@ -7,6 +7,7 @@
 #include "angle_win32.h"
 static char g_renderer[32]="opengl";
 static int angle_requested(void){ return strcmp(g_renderer,"opengl")!=0; }
+const char* backend_renderer_name(void){ return g_renderer; }
 #include <windows.h>
 #include <mmsystem.h>  /* timeBeginPeriod (windows.h leaves it out with WIN32_LEAN_AND_MEAN) */
 
