@@ -1239,9 +1239,16 @@ static u32 ur_alloc(u32 sz){
   g_ur_head=off+need; g_ur_abs+=need; return off; }
 typedef struct { u64 a, gen, abs; u32 sz, epoch, off; } UrC;
 static UrC urc[4096];
+/* Must match shader.c's GLSL uniform-block binding for sparse CB masks.
+   GLES 3.1+ has fewer indexed UBO slots on some ANGLE Direct3D devices. */
+static int cb_bind_slot(int stage, const Sh* s, int guest_slot){
+  int stage_base=(stage==0? 0 : stage==4? 1 : 2)*g_shader_ubo_stride;
+  if(g_gles && g_glsl_es_version>=310 && g_shader_ubo_stride<18)
+    return stage_base+__builtin_popcount(s->si.cbuf_mask&((1u<<guest_slot)-1u));
+  return stage_base+guest_slot;
+}
 static void upload_cbufs_ring(int stage, Sh* s){
   extern u64 g_gw_gen; extern int gpu_mem_dirty_since(u64,u64,u64);
-  int bb=(stage==0? 0 : stage==4? 1 : 2)*g_shader_ubo_stride;
   for(int i=0;i<18;i++){ if(!(s->si.cbuf_mask&(1u<<i))) continue;
     u64 a=g_cb.cb[stage][i]; u32 sz=g_cb.cbsize[stage][i]; if(sz>65536) sz=65536; if(!sz) sz=16;
     if(s->si.cbuf_max[i] && sz>s->si.cbuf_max[i]) sz=s->si.cbuf_max[i];   /* only the bytes the shader reads */
@@ -1251,7 +1258,8 @@ static void upload_cbufs_ring(int stage, Sh* s){
     else { st_cb_bytes+=sz; off=ur_alloc(sz); u8* dst=g_ur_ptr+off; u8* src= a? gmem_ptr(a,sz) : NULL;
       if(src) memcpy(dst,src,sz); else if(a) gmem_read(a,dst,sz); else memset(dst,0,sz);
       if(a){ e->a=a; e->sz=sz; e->epoch=g_submit_epoch; e->gen=g_gw_gen; e->off=off; e->abs=g_ur_abs; } }
-    if(g_ub_bound[bb+i]!=off+1){ glBindBufferRange(GL_UNIFORM_BUFFER,bb+i,g_ur,off,65536); g_ub_bound[bb+i]=off+1; } } }
+    int slot=cb_bind_slot(stage,s,i);
+    if(g_ub_bound[slot]!=off+1){ glBindBufferRange(GL_UNIFORM_BUFFER,slot,g_ur,off,65536); g_ub_bound[slot]=off+1; } } }
 static void upload_cbufs(int stage, Sh* s){
   if(g_ur_ptr){ upload_cbufs_ring(stage,s); return; }
   for(int i=0;i<18;i++){ if(!(s->si.cbuf_mask&(1u<<i))) continue;
@@ -1262,7 +1270,7 @@ static void upload_cbufs(int stage, Sh* s){
     { /* same submit/address, not GPU-written: unchanged (games don't write while the GPU reads) */
       extern u64 g_gw_gen; extern int gpu_mem_dirty_since(u64,u64,u64); static u64 la[5][18], lg[5][18], le[5][18];
       if(a && la[stage][i]==a && le[stage][i]==g_submit_epoch && last_sz[stage][i]>=sz && !gpu_mem_dirty_since(lg[stage][i],a,sz)){
-        st_cb_skip++; glBindBufferBase(GL_UNIFORM_BUFFER,(stage==0? 0 : stage==4? 1 : 2)*g_shader_ubo_stride+i,g_ubuf[stage][i]); continue; }
+        st_cb_skip++; glBindBufferBase(GL_UNIFORM_BUFFER,cb_bind_slot(stage,s,i),g_ubuf[stage][i]); continue; }
       la[stage][i]=a; lg[stage][i]=g_gw_gen; le[stage][i]=g_submit_epoch; }
     st_cb_bytes+=sz;
     u8* src= a? gmem_ptr(a,sz) : NULL; u8 tmp_local[256]; u8* tmp=NULL;
@@ -1270,7 +1278,7 @@ static void upload_cbufs(int stage, Sh* s){
     if(last_sz[stage][i]<sz || memcmp(last[stage][i],src,sz)){      /* exact compare */
       memcpy(last[stage][i],src,sz); last_sz[stage][i]=sz;
       glBindBuffer(GL_UNIFORM_BUFFER,g_ubuf[stage][i]); glBufferData(GL_UNIFORM_BUFFER,65536,NULL,GL_STREAM_DRAW); glBufferSubData(GL_UNIFORM_BUFFER,0,sz,src); }
-    glBindBufferBase(GL_UNIFORM_BUFFER,(stage==0? 0 : stage==4? 1 : 2)*g_shader_ubo_stride+i,g_ubuf[stage][i]); } }
+    glBindBufferBase(GL_UNIFORM_BUFFER,cb_bind_slot(stage,s,i),g_ubuf[stage][i]); } }
 /* multi-bind (GL 4.4): a stage's textures + samplers in two calls, none if nothing changed.
    other glBindTexture users (uploads, creation) use g_scratch_unit */
 typedef void (APIENTRY*PFN_BT_)(GLuint,GLsizei,const GLuint*);
