@@ -132,18 +132,54 @@ static int handle_event(AInputEvent* ev){
     return 1; }
   return 0; }
 static i32 axis(float v){ if(fabsf(v)<0.12f) return 0; if(v>1) v=1; if(v<-1) v=-1; return (i32)(v*32767); }
+/* The game thread can spend a long time loading/recompiling caches, before
+   swr_main starts its per-frame video_poll loop. Android's InputDispatcher
+   still requires the NativeActivity input queue to be drained throughout
+   startup, otherwise it reports an ANR despite the window being alive.
+   Own the queue on one dedicated thread from activity creation onward. */
+static void* input_thread(void* unused){
+  (void)unused;
+  ALooper* lp=ALooper_prepare(ALOOPER_PREPARE_ALLOW_NON_CALLBACKS);
+  if(!lp){ android_log("Android: cannot create input looper"); return NULL; }
+  for(;;){
+    pthread_mutex_lock(&g_mx);
+    if(g_queue_att && (g_queue_att!=g_queue || g_queue_dying)){
+      AInputQueue_detachLooper(g_queue_att);
+      g_queue_att=NULL; g_queue_dying=0;
+      pthread_cond_broadcast(&g_cv);
+    }
+    if(g_queue && !g_queue_att && !g_queue_dying){
+      AInputQueue_attachLooper(g_queue,lp,1,NULL,NULL);
+      g_queue_att=g_queue;
+    }
+    /* Never allow an activity callback to free this queue while it is polled. */
+    if(g_queue_att){
+      int dummy; void* data;
+      while(ALooper_pollOnce(0,NULL,&dummy,&data)>=0){}
+      AInputEvent* ev=NULL;
+      while(AInputQueue_getEvent(g_queue_att,&ev)>=0){
+        if(AInputQueue_preDispatchEvent(g_queue_att,ev)) continue;
+        int handled=handle_event(ev);
+        AInputQueue_finishEvent(g_queue_att,ev,handled);
+      }
+    }
+    pthread_mutex_unlock(&g_mx);
+    usleep(8000);
+  }
+  return NULL;
+}
+
 void video_poll(void){
+  /* Copy the physical pad state atomically; touch controls have their own lock. */
   pthread_mutex_lock(&g_mx);
-  if(g_queue_att && (g_queue_att!=g_queue || g_queue_dying)){ AInputQueue_detachLooper(g_queue_att); g_queue_att=NULL; g_queue_dying=0; pthread_cond_broadcast(&g_cv); }
-  if(g_queue && !g_queue_att && !g_queue_dying){ ALooper* lp=ALooper_prepare(ALOOPER_PREPARE_ALLOW_NON_CALLBACKS); AInputQueue_attachLooper(g_queue,lp,1,NULL,NULL); g_queue_att=g_queue; }
-  AInputQueue* q=g_queue_att;
-  pthread_mutex_unlock(&g_mx);
-  if(q){ int dummy; void* data; while(ALooper_pollOnce(0,NULL,&dummy,&data)>=0){}
-    AInputEvent* ev=NULL; while(AInputQueue_getEvent(q,&ev)>=0){ if(AInputQueue_preDispatchEvent(q,ev)) continue; int h=handle_event(ev); AInputQueue_finishEvent(q,ev,h); } }
   u64 b=g_keys;
-  if(g_hat[0]<-0.5f) b|=1ull<<12; if(g_hat[0]>0.5f) b|=1ull<<14; if(g_hat[1]<-0.5f) b|=1ull<<13; if(g_hat[1]>0.5f) b|=1ull<<15;
-  if(g_trig[0]>0.5f) b|=1ull<<8; if(g_trig[1]>0.5f) b|=1ull<<9;
-  i32 lx=axis(g_ax[0]), ly=-axis(g_ax[1]), rx=axis(g_ax[2]), ry=-axis(g_ax[3]);
+  float ax[4], hat[2], trig[2];
+  memcpy(ax,g_ax,sizeof ax); memcpy(hat,g_hat,sizeof hat); memcpy(trig,g_trig,sizeof trig);
+  pthread_mutex_unlock(&g_mx);
+  if(hat[0]<-0.5f) b|=1ull<<12; if(hat[0]>0.5f) b|=1ull<<14;
+  if(hat[1]<-0.5f) b|=1ull<<13; if(hat[1]>0.5f) b|=1ull<<15;
+  if(trig[0]>0.5f) b|=1ull<<8; if(trig[1]>0.5f) b|=1ull<<9;
+  i32 lx=axis(ax[0]), ly=-axis(ax[1]), rx=axis(ax[2]), ry=-axis(ax[3]);
   overlay_state(&b,&lx,&ly,&rx,&ry);
   g_pad.buttons=b; g_pad.lx=lx; g_pad.ly=ly; g_pad.rx=rx; g_pad.ry=ry;
 }
@@ -238,9 +274,11 @@ static int unpack_game_assets(void){
 
 /* ---------------- game thread */
 static void* game_thread(void* arg){ (void)arg;
+  android_log("Android: native game thread started");
   if(g_packaged && !unpack_game_assets()){
     android_log("Could not unpack the game's APK assets."); ANativeActivity_finish(g_act); return NULL;
   }
+  android_log("Android: game assets ready, loading recompiled code");
   char argv0[1400]; snprintf(argv0,sizeof argv0,"%s/%s",g_ext,g_name); char* argv[2]={argv0,NULL};
   extern int swr_main(int,char**); swr_main(1,argv); return NULL; }
 static int dir_exists(const char* p){ struct stat s; return !stat(p,&s) && S_ISDIR(s.st_mode); }
@@ -273,6 +311,9 @@ JNIEXPORT void ANativeActivity_onCreate(ANativeActivity* a, void* saved, size_t 
   immersive(a->env);
   if(g_started) return;      /* activity recreated, game is still running */
   g_started=1;
+  /* Input must remain responsive during asset extraction and initial GPU setup. */
+  { pthread_t input; if(!pthread_create(&input,NULL,input_thread,NULL)) pthread_detach(input);
+    else android_log("Android: could not start the input thread"); }
   { /* game name asset; APKs packaged by older versions call it nombre.txt */
     char* nm=asset_text("switchrecomp/name.txt"); if(!nm) nm=asset_text("switchrecomp/nombre.txt");
     if(nm){ strncpy(g_name,nm,sizeof g_name-1); free(nm); } }
