@@ -76,7 +76,7 @@ static void APIENTRY f_daibi(GLenum m, GLint f, GLsizei c, GLsizei n, GLuint bi)
 static void APIENTRY f_lop(GLenum a){ (void)a; }
 static int gles_desktop_only(const char* n){
   static const char* l[]={"glViewportIndexedf","glScissorIndexed","glDepthRangeIndexed","glClearDepth","glDrawBuffer","glPolygonMode","glPointSize","glPrimitiveRestartIndex",
-    "glGetTexImage","glGetBufferSubData","glProvokingVertex","glLogicOp","glDrawElementsInstancedBaseVertexBaseInstance","glDrawArraysInstancedBaseInstance",NULL};
+    "glGetTexImage","glGetBufferSubData","glProvokingVertex","glShaderStorageBlockBinding","glLogicOp","glDrawElementsInstancedBaseVertexBaseInstance","glDrawArraysInstancedBaseInstance",NULL};
   for(int i=0;l[i];i++) if(!strcmp(l[i],n)) return 1; return 0; }
 static int gles_fallback(const char* n, void** p, void* (*gp)(const char*)){
   if(!g_is_gles) return 0;
@@ -87,12 +87,10 @@ static int gles_fallback(const char* n, void** p, void* (*gp)(const char*)){
   o_dei=(void (APIENTRY*)(GLenum,GLsizei,GLenum,const void*,GLsizei))gp("glDrawElementsInstanced");
   o_map=(void*)gp("glMapBufferRange"); o_unmap=(void*)gp("glUnmapBuffer");
   if(g_legacy) o_deibv=NULL;
-  /* Storage-block binding is GLES 3.1 core. Its absence must be reported
-     instead of silently turning compute bindings into a no-op. */
-  if(!strcmp(n,"glShaderStorageBlockBinding")){
-    if(g_legacy){ *p=(void*)f_nop_uuu; return 1; }  /* GLES 3.0 cannot dispatch compute */
-    return 0;  /* GLES 3.1+: never silently ignore an SSBO binding */
-  }
+  /* OpenGL desktop provides glShaderStorageBlockBinding; GLES uses
+     layout(std430,binding=N) in the generated shader instead. No game
+     runtime call site depends on the desktop-only entry point. */
+  if(!strcmp(n,"glShaderStorageBlockBinding")){ *p=(void*)f_nop_uuu; return 1; }
   if(!strcmp(n,"glViewportIndexedf")) *p=(void*)f_vpi; else if(!strcmp(n,"glScissorIndexed")) *p=(void*)f_sci;
   else if(!strcmp(n,"glDepthRangeIndexed")) *p=(void*)f_dri; else if(!strcmp(n,"glClearDepth")) *p=(void*)f_cd;
   else if(!strcmp(n,"glPolygonMode")) *p=(void*)f_nop_ee; else if(!strcmp(n,"glPointSize")) *p=(void*)f_nop_f;
