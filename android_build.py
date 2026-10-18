@@ -95,8 +95,15 @@ def toolchains(sdk_arg=None, ndk_arg=None, auto=False):
     if not java or not keytool:
         raise ValueError('A JDK (java.exe and keytool.exe) is required. Choose auto-download in the Android build settings or install JDK 17.')
     tools['java'], tools['keytool'] = Path(java), Path(keytool)
+    javac = Path(java).with_name('javac.exe' if os.name == 'nt' else 'javac')
+    if not javac.is_file():
+        existing = shutil.which('javac')
+        if existing:
+            javac = Path(existing)
+    tools['javac'] = javac
+    tools['d8'] = bt / 'lib/d8.jar'
     if not all(p.is_file() for p in tools.values()):
-        raise ValueError('The selected Android SDK build-tools are incomplete.')
+        raise ValueError('Android build tools must include a full JDK (javac), D8, aapt2, zipalign and apksigner.')
     return cc, cxx, llvm / 'sysroot', platform_dir / 'android.jar', tools
 
 
@@ -181,14 +188,39 @@ def make_manifest(package, label):
             'android:versionCode="1" android:versionName="0.1-experimental">'
             '<uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35"/>'
             '<uses-feature android:glEsVersion="0x00030002" android:required="true"/>'
-            '<application android:label=%s android:hasCode="false" android:extractNativeLibs="true" '
+            '<application android:label=%s android:hasCode="true" android:extractNativeLibs="true" '
             'android:allowBackup="false">'
-            '<activity android:name="android.app.NativeActivity" android:exported="true" '
-            'android:screenOrientation="sensorLandscape" android:configChanges="orientation|screenSize|keyboardHidden">'
-            '<meta-data android:name="android.app.lib_name" android:value="swr_runtime"/>'
+            '<activity android:name="org.switchrecomp.frontend.LauncherActivity" android:exported="true" '
+            'android:screenOrientation="unspecified">'
             '<intent-filter><action android:name="android.intent.action.MAIN"/>'
             '<category android:name="android.intent.category.LAUNCHER"/></intent-filter>'
+            '</activity>'
+            '<activity android:name="android.app.NativeActivity" android:exported="false" '
+            'android:screenOrientation="sensorLandscape" android:configChanges="orientation|screenSize|keyboardHidden">'
+            '<meta-data android:name="android.app.lib_name" android:value="swr_runtime"/>'
             '</activity></application></manifest>') % (quoteattr(package), quoteattr(label))
+
+
+def launcher_dex(work, jar, tools):
+    """Compile the standalone Android launcher using the installed JDK and D8."""
+    source = HERE / 'android/LauncherActivity.java'
+    if not source.is_file():
+        raise ValueError('Android launcher source is missing from the application payload.')
+    classes = work / 'launcher-classes'
+    classes.mkdir(parents=True, exist_ok=True)
+    run([tools['javac'], '-encoding', 'UTF-8', '-source', '8', '-target', '8',
+         '-classpath', jar, '-d', classes, source])
+    files = sorted(classes.rglob('*.class'))
+    if not files:
+        raise ValueError('Android launcher compiled no Java classes.')
+    dex = work / 'launcher-dex'
+    dex.mkdir(parents=True, exist_ok=True)
+    run([tools['java'], '-cp', tools['d8'], 'com.android.tools.r8.D8',
+         '--min-api', '26', '--lib', jar, '--output', dex, *files])
+    output = dex / 'classes.dex'
+    if not output.is_file():
+        raise ValueError('D8 did not create the Android launcher classes.dex.')
+    return output
 
 
 def package_apk(base, module, rt, jar, tools, package, label, keystore=None):
@@ -196,6 +228,7 @@ def package_apk(base, module, rt, jar, tools, package, label, keystore=None):
     work.mkdir(exist_ok=True)
     manifest = work / 'AndroidManifest.xml'
     manifest.write_text(make_manifest(package, label), encoding='utf-8')
+    launcher = launcher_dex(work, jar, tools)
     unsigned, aligned = work / 'unsigned.apk', work / 'aligned.apk'
     run([tools['aapt2'], 'link', '-I', jar, '--manifest', manifest, '-o', unsigned])
     assets = asset_files(Path(str(base) + '_data'))
@@ -206,6 +239,7 @@ def package_apk(base, module, rt, jar, tools, package, label, keystore=None):
         raise ValueError('Too many assets for this Android exporter.')
     digest = hashlib.sha256(manifest_text.encode('utf-8'))
     with zipfile.ZipFile(unsigned, 'a', allowZip64=False) as apk:
+        apk.write(launcher, 'classes.dex', compress_type=zipfile.ZIP_DEFLATED)
         for src, name in [(module, 'lib/arm64-v8a/libgame_code.so'),
                           (rt, 'lib/arm64-v8a/libswr_runtime.so')]:
             apk.write(src, name, compress_type=zipfile.ZIP_DEFLATED)
