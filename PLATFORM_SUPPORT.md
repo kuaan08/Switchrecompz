@@ -6,8 +6,8 @@ These integrations are experimental and do not establish game compatibility.
 | Target | Implementation | Validation boundary |
 | --- | --- | --- |
 | Windows OpenGL | Existing Win32/WGL renderer | Default; per-game correctness varies |
-| Windows Vulkan | EGL/ANGLE context and the existing GLES renderer/shader path | Hardware needs ANGLE GLES 3.2; software CI probes GLES 3.1, not every hardware feature |
-| Windows DirectX 11 | ANGLE GLES 3.0 compatibility profile, linked varyings, explicit sampler/UBO bindings | No compute/storage shaders or multiple render targets; limited shader/resource subset |
+| Windows Vulkan | EGL/ANGLE context with negotiated GLES 3.2 or 3.1; correct matching GLSL versions | Software Vulkan is tested; native GPUs, game-specific shaders and advanced features still need validation |
+| Windows DirectX 11 | ANGLE attempts GLES 3.2, 3.1, then 3.0; GLES 3.1 enables compute/SSBO and MRT paths, with packed sparse guest UBO bindings | Availability depends on GPU/ANGLE, compute/SSBO probes run when GLES 3.1 exists; compatibility is not complete |
 | DirectX 11 WARP | Same profile on Windows' software rasterizer | Diagnostic option, not a performance optimization |
 | Android arm64 | NDK compilation, NativeActivity, GLES 3.2, touch/gamepad input, AAudio and signed APK export | Synthetic build/signature/ABI checks; device and game tests still needed |
 
@@ -23,12 +23,20 @@ values: `opengl`, `vulkan`, `d3d11`, `d3d11-warp`. The CLI accepts `--renderer`.
 The selected path never silently falls back to desktop OpenGL. Game builds
 receive ANGLE DLLs in the adjacent `angle` directory.
 
-D3D11 uses GLSL ES 3.0 because ANGLE D3D11 does not supply GLES 3.2. Its subset
-covers basic vertex/fragment shaders, textures and constant buffers. Compute,
-storage shaders and excess constant-buffer use are rejected; multiple render
-targets stop with a diagnostic. Nonzero base vertex/instance and advanced
-sampler/format behavior remain limitations. Unsupported shader operations may
-fail compilation. Use Vulkan or OpenGL for titles needing these features.
+D3D11 now requests GLES 3.2 first, then 3.1, then 3.0. Context selection is
+reported in the logs. GLES 3.1 enables compute/storage shader dispatch,
+storage-buffer bindings and MRT where ANGLE and the GPU actually support them.
+Sparse guest constant-buffer indices are packed into available native UBO
+bindings for GLES 3.1+, reducing errors on ANGLE with smaller binding limits.
+GLES 3.0 remains the limited fallback without compute/SSBO and with restricted
+MRT support. Each GLES version uses separate generated shader caches.
+The Windows CI verifies a triangle, UBO, buffer readback and presentation, and
+executes an SSBO compute shader whenever the chosen GLES version is 3.1+.
+
+The backend still has unsupported Maxwell instructions, texture formats,
+geometry/tessellation stages, base-vertex/instance cases and incomplete GPU
+synchronization. None of these fixes imply full DirectX or Vulkan game compatibility.
+DirectX 12 still requires a separate backend; ANGLE here uses D3D11 only.
 
 Shader packs are separated by desktop/GLES profile; binary keys include GLSL
 and driver identity. Incompatible packs are not reused across profiles.
